@@ -29,6 +29,11 @@
 			) {
 				goto('/');
 			} else if (
+				$page.url.pathname.includes('/experts') &&
+				!$user?.permissions?.workspace?.experts
+			) {
+				goto('/');
+			} else if (
 				$page.url.pathname.includes('/prompts') &&
 				!$user?.permissions?.workspace?.prompts
 			) {
@@ -105,6 +110,19 @@
 								href="/workspace/knowledge"
 							>
 								{$i18n.t('Knowledge')}
+							</a>
+						{/if}
+
+						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.experts}
+							<a
+								draggable="false"
+								aria-current={$page.url.pathname.includes('/workspace/experts') ? 'page' : null}
+								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/experts')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+								href="/workspace/experts"
+							>
+								{$i18n.t('Experts')}
 							</a>
 						{/if}
 
