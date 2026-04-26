@@ -151,7 +151,7 @@
 
 <svelte:head>
 	<title>
-		{$i18n.t('Knowledge')} • {$WEBUI_NAME}
+		知识库 • {$WEBUI_NAME}
 	</title>
 </svelte:head>
 
@@ -167,7 +167,7 @@
 		<div class="flex justify-between items-center">
 			<div class="flex items-center md:self-center text-xl font-medium px-0.5 gap-2 shrink-0">
 				<div>
-					{$i18n.t('Knowledge')}
+					知识库
 				</div>
 
 				<div class="text-lg font-medium text-gray-500 dark:text-gray-500">
@@ -182,7 +182,7 @@
 				>
 					<Plus className="size-3" strokeWidth="2.5" />
 
-					<div class=" hidden md:block md:ml-1 text-xs">{$i18n.t('New Knowledge')}</div>
+					<div class=" hidden md:block md:ml-1 text-xs">新建知识库</div>
 				</a>
 			</div>
 		</div>
@@ -199,8 +199,8 @@
 				<input
 					class=" w-full text-sm py-1 rounded-r-xl outline-hidden bg-transparent"
 					bind:value={query}
-					aria-label={$i18n.t('Search Knowledge')}
-					placeholder={$i18n.t('Search Knowledge')}
+					aria-label="搜索知识库"
+					placeholder="搜索知识库"
 				/>
 				{#if query}
 					<div class="self-center pl-1.5 translate-y-[0.5px] rounded-l-xl bg-transparent">

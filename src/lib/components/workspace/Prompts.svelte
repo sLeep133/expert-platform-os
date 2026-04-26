@@ -212,7 +212,7 @@
 
 <svelte:head>
 	<title>
-		{$i18n.t('Prompts')} • {$WEBUI_NAME}
+		提示词 • {$WEBUI_NAME}
 	</title>
 </svelte:head>
 
@@ -272,7 +272,7 @@
 		<div class="flex justify-between items-center">
 			<div class="flex items-center md:self-center text-xl font-medium px-0.5 gap-2 shrink-0">
 				<div>
-					{$i18n.t('Prompts')}
+					提示词
 				</div>
 
 				<div class="text-lg font-medium text-gray-500 dark:text-gray-500">

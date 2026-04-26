@@ -177,7 +177,7 @@
 
 <svelte:head>
 	<title>
-		{$i18n.t('Skills')} • {$WEBUI_NAME}
+		技能 • {$WEBUI_NAME}
 	</title>
 </svelte:head>
 
@@ -186,7 +186,7 @@
 		<div class="flex justify-between items-center">
 			<div class="flex items-center md:self-center text-xl font-medium px-0.5 gap-2 shrink-0">
 				<div>
-					{$i18n.t('Skills')}
+					技能
 				</div>
 
 				<div class="text-lg font-medium text-gray-500 dark:text-gray-500">

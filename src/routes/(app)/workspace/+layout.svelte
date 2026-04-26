@@ -96,7 +96,7 @@
 								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/models')
 									? ''
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
-								href="/workspace/models">{$i18n.t('Models')}</a
+								href="/workspace/models">模型</a
 							>
 						{/if}
 
@@ -109,7 +109,7 @@
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
 								href="/workspace/knowledge"
 							>
-								{$i18n.t('Knowledge')}
+								知识库
 							</a>
 						{/if}
 
@@ -122,7 +122,7 @@
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
 								href="/workspace/experts"
 							>
-								{$i18n.t('Experts')}
+								专家
 							</a>
 						{/if}
 
@@ -133,7 +133,7 @@
 								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/prompts')
 									? ''
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
-								href="/workspace/prompts">{$i18n.t('Prompts')}</a
+								href="/workspace/prompts">提示词</a
 							>
 						{/if}
 
@@ -146,7 +146,7 @@
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
 								href="/workspace/skills"
 							>
-								{$i18n.t('Skills')}
+								技能
 							</a>
 						{/if}
 
@@ -159,7 +159,7 @@
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
 								href="/workspace/tools"
 							>
-								{$i18n.t('Tools')}
+								工具
 							</a>
 						{/if}
 					</div>

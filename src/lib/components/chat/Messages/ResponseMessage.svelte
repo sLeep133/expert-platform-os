@@ -112,6 +112,28 @@
 			load_duration?: number;
 			usage?: unknown;
 		};
+		expertContext?: {
+			expert_id: string;
+			expert_name: string;
+			injected_pages?: {
+				knowledge_id: string;
+				knowledge_name: string;
+				page_id: string;
+				title: string;
+				source_name: string;
+			}[];
+		};
+		expert_context?: {
+			expert_id: string;
+			expert_name: string;
+			injected_pages?: {
+				knowledge_id: string;
+				knowledge_name: string;
+				page_id: string;
+				title: string;
+				source_name: string;
+			}[];
+		};
 		annotation?: { type: string; rating: number };
 	}
 
@@ -168,6 +190,7 @@
 
 	let model = null;
 	$: model = $models.find((m) => m.id === message.model);
+	$: messageExpertContext = message?.expertContext ?? message?.expert_context ?? null;
 
 	$: statusEntries = message?.statusHistory ?? [...(message?.status ? [message?.status] : [])];
 	$: hasVisibleStatus =
@@ -843,6 +866,36 @@
 
 							{#if message.code_executions}
 								<CodeExecutions codeExecutions={message.code_executions} />
+							{/if}
+
+							{#if messageExpertContext}
+								<details class="mt-3 rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-900/60 px-3 py-2">
+									<summary class="cursor-pointer text-sm text-gray-700 dark:text-gray-200">
+										{$i18n.t('Expert Context')}: {messageExpertContext.expert_name}
+										{#if (messageExpertContext.injected_pages ?? []).length > 0}
+											({(messageExpertContext.injected_pages ?? []).length} {$i18n.t('pages')})
+										{/if}
+									</summary>
+
+									<div class="mt-2 space-y-2">
+										{#if (messageExpertContext.injected_pages ?? []).length > 0}
+											{#each messageExpertContext.injected_pages as page}
+												<div class="rounded-lg border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 px-3 py-2">
+													<div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+														{page.title}
+													</div>
+													<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+														{page.knowledge_name} - {page.source_name}
+													</div>
+												</div>
+											{/each}
+										{:else}
+											<div class="text-xs text-gray-500 dark:text-gray-400">
+												{$i18n.t('This response used the selected expert, but no compiled wiki pages were injected.')}
+											</div>
+										{/if}
+									</div>
+								</details>
 							{/if}
 						</div>
 					</div>

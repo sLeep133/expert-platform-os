@@ -26,6 +26,8 @@
 	} from '$lib/apis/files';
 	import {
 		addFileToKnowledgeById,
+		compileKnowledgeById,
+		getKnowledgeCompileStatusById,
 		getKnowledgeById,
 		removeFileFromKnowledgeById,
 		resetKnowledgeById,
@@ -34,6 +36,7 @@
 		updateKnowledgeAccessGrants,
 		searchKnowledgeFilesById
 	} from '$lib/apis/knowledge';
+	import { getExperts } from '$lib/apis/experts';
 	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
 
 	import { blobToFile, isYoutubeUrl } from '$lib/utils';
@@ -78,6 +81,31 @@
 		files: any[];
 		access_grants?: any[];
 		write_access?: boolean;
+		meta?: {
+			expert_platform?: {
+				compile?: {
+					job_id?: string | null;
+					status?: string;
+					started_at?: number | null;
+					finished_at?: number | null;
+					error?: string | null;
+					asset_count?: number;
+					page_count?: number;
+				};
+				wiki?: {
+					pages?: Array<{
+						id: string;
+						title: string;
+						source_file_id: string;
+						source_name: string;
+						summary: string;
+						excerpt: string;
+						word_count: number;
+						updated_at: number;
+					}>;
+				};
+			};
+		};
 	};
 
 	let id = null;
@@ -100,9 +128,140 @@
 	let currentPage = 1;
 	let fileItems = null;
 	let fileItemsTotal = null;
+	let compileStarting = false;
+	let compileStatus = {
+		status: 'idle',
+		job_id: null,
+		started_at: null,
+		finished_at: null,
+		error: null,
+		asset_count: 0,
+		page_count: 0
+	};
+	let wikiPages = [];
+	let compilePollingTimer: ReturnType<typeof setInterval> | null = null;
+	let linkedExperts = [];
+	let loadingLinkedExperts = false;
 
 	const reset = () => {
 		currentPage = 1;
+	};
+
+	const applyCompilePayload = (payload) => {
+		compileStatus = {
+			status: payload?.compile?.status ?? 'idle',
+			job_id: payload?.compile?.job_id ?? null,
+			started_at: payload?.compile?.started_at ?? null,
+			finished_at: payload?.compile?.finished_at ?? null,
+			error: payload?.compile?.error ?? null,
+			asset_count: payload?.compile?.asset_count ?? 0,
+			page_count: payload?.compile?.page_count ?? 0
+		};
+		wikiPages = payload?.wiki_pages ?? [];
+
+		if (knowledge) {
+			knowledge = {
+				...knowledge,
+				meta: {
+					...(knowledge.meta ?? {}),
+					expert_platform: {
+						...(knowledge.meta?.expert_platform ?? {}),
+						compile: { ...compileStatus },
+						wiki: {
+							...(knowledge.meta?.expert_platform?.wiki ?? {}),
+							pages: [...wikiPages]
+						}
+					}
+				}
+			};
+		}
+	};
+
+	const syncCompileFromKnowledge = () => {
+		const expertPlatform = knowledge?.meta?.expert_platform ?? {};
+		compileStatus = {
+			status: expertPlatform?.compile?.status ?? 'idle',
+			job_id: expertPlatform?.compile?.job_id ?? null,
+			started_at: expertPlatform?.compile?.started_at ?? null,
+			finished_at: expertPlatform?.compile?.finished_at ?? null,
+			error: expertPlatform?.compile?.error ?? null,
+			asset_count: expertPlatform?.compile?.asset_count ?? 0,
+			page_count: expertPlatform?.compile?.page_count ?? 0
+		};
+		wikiPages = expertPlatform?.wiki?.pages ?? [];
+	};
+
+	const stopCompilePolling = () => {
+		if (compilePollingTimer) {
+			clearInterval(compilePollingTimer);
+			compilePollingTimer = null;
+		}
+	};
+
+	const refreshCompileStatus = async ({ silent = false } = {}) => {
+		if (!knowledgeId) return null;
+
+		const res = await getKnowledgeCompileStatusById(localStorage.token, knowledgeId).catch((e) => {
+			if (!silent) {
+				toast.error(`${e}`);
+			}
+			return null;
+		});
+
+		if (res) {
+			applyCompilePayload(res);
+			if (!['queued', 'running'].includes(res?.compile?.status ?? '')) {
+				stopCompilePolling();
+			}
+		}
+
+		return res;
+	};
+
+	const startCompilePolling = () => {
+		if (compilePollingTimer || !knowledgeId) return;
+
+		compilePollingTimer = setInterval(async () => {
+			const res = await refreshCompileStatus({ silent: true });
+			if (!['queued', 'running'].includes(res?.compile?.status ?? '')) {
+				stopCompilePolling();
+			}
+		}, 2000);
+	};
+
+	const compileKnowledgeHandler = async () => {
+		if (!knowledge?.write_access || !knowledgeId || compileStarting) return;
+
+		compileStarting = true;
+		const res = await compileKnowledgeById(localStorage.token, knowledgeId).catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
+		compileStarting = false;
+
+		if (res) {
+			applyCompilePayload(res);
+			if (['queued', 'running'].includes(res?.compile?.status ?? '')) {
+				toast.success($i18n.t('Knowledge compile started'));
+				startCompilePolling();
+			}
+		}
+	};
+
+	const loadLinkedExperts = async () => {
+		if (!knowledgeId) return;
+
+		loadingLinkedExperts = true;
+		try {
+			const experts = await getExperts(localStorage.token);
+			linkedExperts = (experts ?? []).filter((expert) =>
+				(expert.knowledge_spaces ?? []).includes(knowledgeId)
+			);
+		} catch (e) {
+			toast.error(`${e}`);
+		} finally {
+			loadingLinkedExperts = false;
+		}
 	};
 
 	const init = async () => {
@@ -752,6 +911,11 @@
 				knowledge.access_grants = [];
 			}
 			knowledgeId = knowledge?.id;
+			syncCompileFromKnowledge();
+			await loadLinkedExperts();
+			if (['queued', 'running'].includes(compileStatus.status ?? '')) {
+				startCompilePolling();
+			}
 		} else {
 			goto('/workspace/knowledge');
 		}
@@ -764,6 +928,7 @@
 
 	onDestroy(() => {
 		clearTimeout(searchDebounceTimer);
+		stopCompilePolling();
 		mediaQuery?.removeEventListener('change', handleMediaQuery);
 		const dropZone = document.querySelector('body');
 		dropZone?.removeEventListener('dragover', onDragOver);
@@ -916,6 +1081,127 @@
 					</div>
 				</div>
 			</div>
+
+			<div class="mt-3 rounded-2xl border border-gray-100 dark:border-gray-900 bg-white dark:bg-gray-950 px-3 py-3">
+				<div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+					<div class="space-y-1">
+						<div class="text-sm font-medium text-gray-900 dark:text-gray-100">Wiki 编译</div>
+						<div class="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+							<div class="px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-200">
+								状态：{compileStatus.status === 'queued'
+									? '排队中'
+									: compileStatus.status === 'running'
+										? '编译中'
+										: compileStatus.status === 'completed'
+											? '已完成'
+											: compileStatus.status === 'failed'
+												? '失败'
+												: '未开始'}
+							</div>
+							<div>资源：{compileStatus.asset_count}</div>
+							<div>页面：{compileStatus.page_count}</div>
+						</div>
+
+						{#if compileStatus.error}
+							<div class="text-xs text-red-500">
+								{compileStatus.error}
+							</div>
+						{/if}
+					</div>
+
+					{#if knowledge?.write_access}
+						<div class="shrink-0">
+							<button
+								class="px-3 py-2 rounded-xl text-sm bg-gray-900 text-white dark:bg-white dark:text-gray-900 hover:opacity-90 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+								type="button"
+								disabled={compileStarting || ['queued', 'running'].includes(compileStatus.status)}
+								on:click={compileKnowledgeHandler}
+							>
+								{#if compileStarting || ['queued', 'running'].includes(compileStatus.status)}
+									<Spinner className="size-4" />
+								{/if}
+								编译 Wiki
+							</button>
+						</div>
+					{/if}
+				</div>
+
+				{#if wikiPages.length > 0}
+					<div class="mt-3 grid grid-cols-1 xl:grid-cols-2 gap-2">
+						{#each wikiPages as page}
+							<div class="rounded-xl border border-gray-100 dark:border-gray-900 px-3 py-2">
+								<div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+									{page.title}
+								</div>
+								<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+									{page.source_name} - {page.word_count} 字
+								</div>
+								<div class="mt-2 text-sm text-gray-600 dark:text-gray-300 line-clamp-3">
+									{page.summary}
+								</div>
+							</div>
+						{/each}
+					</div>
+				{:else if compileStatus.status === 'completed'}
+					<div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+						编译已完成，但当前文件还没有生成可用的 Wiki 页面。
+					</div>
+				{/if}
+			</div>
+
+			<div class="mt-3 rounded-2xl border border-gray-100 dark:border-gray-900 bg-white dark:bg-gray-950 px-3 py-3">
+				<div class="flex items-center justify-between gap-3">
+					<div>
+						<div class="text-sm font-medium text-gray-900 dark:text-gray-100">关联专家</div>
+						<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+							这里显示已使用当前知识空间的专家；请先到“专家”页面创建专家，再在“知识关联”里选中当前知识空间。
+						</div>
+					</div>
+					{#if loadingLinkedExperts}
+						<div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+							<Spinner className="size-3.5" />
+							<span>加载中</span>
+						</div>
+					{/if}
+				</div>
+
+				{#if linkedExperts.length > 0}
+					<div class="mt-3 grid grid-cols-1 xl:grid-cols-2 gap-2">
+						{#each linkedExperts as expert}
+							<button
+								type="button"
+								class="w-full text-left rounded-xl border border-gray-100 dark:border-gray-900 px-3 py-3 hover:bg-gray-50 dark:hover:bg-gray-900 transition"
+								on:click={() => goto(`/workspace/experts/edit?id=${expert.id}`)}
+							>
+								<div class="flex items-start justify-between gap-3">
+									<div>
+										<div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+											{expert.name}
+										</div>
+										{#if expert.description}
+											<div class="mt-1 text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
+												{expert.description}
+											</div>
+										{/if}
+									</div>
+									<div class="text-[11px] px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300">
+										{expert.visibility === 'shared' ? '共享' : expert.visibility === 'private' ? '私有' : expert.visibility}
+									</div>
+								</div>
+								{#if expert.knowledge_pinned_pages?.length > 0}
+									<div class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+										已固定 {expert.knowledge_pinned_pages.length} 个重点页面
+									</div>
+								{/if}
+							</button>
+						{/each}
+					</div>
+				{:else if !loadingLinkedExperts}
+					<div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+						当前还没有专家关联这个知识空间。
+					</div>
+				{/if}
+			</div>
 		</div>
 
 		<div
@@ -929,8 +1215,8 @@
 					<input
 						class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
 						bind:value={query}
-						aria-label={$i18n.t('Search Collection')}
-						placeholder={$i18n.t('Search Collection')}
+						aria-label="搜索知识内容"
+						placeholder="搜索知识内容"
 						on:focus={() => {
 							selectedFileId = null;
 						}}

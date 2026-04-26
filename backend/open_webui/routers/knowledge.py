@@ -3,8 +3,12 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.responses import StreamingResponse
 
+import asyncio
 import logging
 import io
+import re
+import time
+import uuid
 import zipfile
 from urllib.parse import quote
 
@@ -105,6 +109,226 @@ class KnowledgeAccessResponse(KnowledgeUserResponse):
 class KnowledgeAccessListResponse(BaseModel):
     items: list[KnowledgeAccessResponse]
     total: int
+
+
+class KnowledgeCompilePage(BaseModel):
+    id: str
+    title: str
+    source_file_id: str
+    source_name: str
+    summary: str
+    excerpt: str
+    word_count: int
+    updated_at: int
+
+
+class KnowledgeCompileIndexEntry(BaseModel):
+    id: str
+    title: str
+    source_file_id: str
+
+
+class KnowledgeCompileState(BaseModel):
+    job_id: Optional[str] = None
+    status: str = 'idle'
+    started_at: Optional[int] = None
+    finished_at: Optional[int] = None
+    error: Optional[str] = None
+    asset_count: int = 0
+    page_count: int = 0
+
+
+class KnowledgeCompileResponse(BaseModel):
+    knowledge_id: str
+    compile: KnowledgeCompileState
+    wiki_pages: list[KnowledgeCompilePage]
+    index: list[KnowledgeCompileIndexEntry]
+
+
+def _get_compile_meta(meta: Optional[dict]) -> dict:
+    if not isinstance(meta, dict):
+        return {}
+    expert_platform = meta.get('expert_platform')
+    if not isinstance(expert_platform, dict):
+        return {}
+    compile_meta = expert_platform.get('compile')
+    return compile_meta if isinstance(compile_meta, dict) else {}
+
+
+def _get_wiki_meta(meta: Optional[dict]) -> dict:
+    if not isinstance(meta, dict):
+        return {}
+    expert_platform = meta.get('expert_platform')
+    if not isinstance(expert_platform, dict):
+        return {}
+    wiki_meta = expert_platform.get('wiki')
+    return wiki_meta if isinstance(wiki_meta, dict) else {}
+
+
+def _truncate_text(value: str, max_chars: int = 600) -> str:
+    value = re.sub(r'\s+', ' ', value or '').strip()
+    if len(value) <= max_chars:
+        return value
+    return f'{value[: max_chars - 3].rstrip()}...'
+
+
+def _build_page_title(file: FileModel) -> str:
+    source_name = (
+        (file.meta or {}).get('name')
+        or file.filename
+        or f'file-{file.id}'
+    )
+    return re.sub(r'\.[^.]+$', '', source_name).strip() or source_name
+
+
+def _extract_file_text(file: FileModel) -> str:
+    data = file.data or {}
+    candidates = [
+        data.get('content'),
+        data.get('text'),
+        data.get('body'),
+        data.get('document'),
+    ]
+
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+        if isinstance(candidate, list):
+            joined = '\n\n'.join(str(item).strip() for item in candidate if str(item).strip())
+            if joined:
+                return joined
+
+    return ''
+
+
+def _build_compile_response(knowledge) -> KnowledgeCompileResponse:
+    compile_meta = _get_compile_meta(knowledge.meta)
+    wiki_meta = _get_wiki_meta(knowledge.meta)
+
+    return KnowledgeCompileResponse(
+        knowledge_id=knowledge.id,
+        compile=KnowledgeCompileState(**compile_meta),
+        wiki_pages=[KnowledgeCompilePage(**page) for page in wiki_meta.get('pages', [])],
+        index=[KnowledgeCompileIndexEntry(**entry) for entry in wiki_meta.get('index', [])],
+    )
+
+
+async def _update_compile_snapshot(
+    knowledge_id: str,
+    *,
+    status: str,
+    job_id: Optional[str] = None,
+    started_at: Optional[int] = None,
+    finished_at: Optional[int] = None,
+    error: Optional[str] = None,
+    asset_count: Optional[int] = None,
+    page_count: Optional[int] = None,
+    pages: Optional[list[dict]] = None,
+    index: Optional[list[dict]] = None,
+) -> None:
+    knowledge = await Knowledges.get_knowledge_by_id(id=knowledge_id)
+    if not knowledge:
+        return
+
+    meta = dict(knowledge.meta or {})
+    expert_platform = dict(meta.get('expert_platform') or {})
+    compile_meta = dict(expert_platform.get('compile') or {})
+    wiki_meta = dict(expert_platform.get('wiki') or {})
+
+    compile_meta['status'] = status
+    if job_id is not None:
+        compile_meta['job_id'] = job_id
+    if started_at is not None:
+        compile_meta['started_at'] = started_at
+    if finished_at is not None:
+        compile_meta['finished_at'] = finished_at
+    if error is not None or status != 'failed':
+        compile_meta['error'] = error
+    if asset_count is not None:
+        compile_meta['asset_count'] = asset_count
+    if page_count is not None:
+        compile_meta['page_count'] = page_count
+
+    if pages is not None:
+        wiki_meta['pages'] = pages
+    if index is not None:
+        wiki_meta['index'] = index
+
+    expert_platform['compile'] = compile_meta
+    expert_platform['wiki'] = wiki_meta
+    meta['expert_platform'] = expert_platform
+
+    await Knowledges.update_knowledge_meta_by_id(id=knowledge_id, meta=meta)
+
+
+async def _compile_knowledge_pages(knowledge_id: str, job_id: str) -> None:
+    started_at = int(time.time())
+    try:
+        files = await Knowledges.get_files_by_id(knowledge_id)
+        await _update_compile_snapshot(
+            knowledge_id,
+            status='running',
+            job_id=job_id,
+            started_at=started_at,
+            finished_at=None,
+            error=None,
+            asset_count=len(files),
+        )
+
+        pages = []
+        for file in files:
+            source_name = (file.meta or {}).get('name') or file.filename or file.id
+            text = _extract_file_text(file)
+            excerpt = _truncate_text(text, 800)
+            summary = _truncate_text(text, 240) if text else 'No extracted text content available.'
+
+            pages.append(
+                {
+                    'id': f'page-{file.id}',
+                    'title': _build_page_title(file),
+                    'source_file_id': file.id,
+                    'source_name': source_name,
+                    'summary': summary,
+                    'excerpt': excerpt,
+                    'word_count': len(text.split()) if text else 0,
+                    'updated_at': file.updated_at or file.created_at or started_at,
+                }
+            )
+
+        pages.sort(key=lambda page: (page['title'].lower(), page['source_file_id']))
+        index = [
+            {
+                'id': page['id'],
+                'title': page['title'],
+                'source_file_id': page['source_file_id'],
+            }
+            for page in pages
+        ]
+
+        await _update_compile_snapshot(
+            knowledge_id,
+            status='completed',
+            job_id=job_id,
+            started_at=started_at,
+            finished_at=int(time.time()),
+            error=None,
+            asset_count=len(files),
+            page_count=len(pages),
+            pages=pages,
+            index=index,
+        )
+    except Exception as e:
+        log.exception(f'Knowledge compile failed for {knowledge_id}: {e}')
+        await _update_compile_snapshot(
+            knowledge_id,
+            status='failed',
+            job_id=job_id,
+            started_at=started_at,
+            finished_at=int(time.time()),
+            error=str(e),
+            pages=[],
+            index=[],
+        )
 
 
 @router.get('/', response_model=KnowledgeAccessListResponse)
@@ -423,6 +647,95 @@ async def get_knowledge_by_id(id: str, user=Depends(get_verified_user), db: Asyn
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
+
+
+############################
+# CompileKnowledgeById
+############################
+
+
+@router.get('/{id}/compile/status', response_model=KnowledgeCompileResponse)
+async def get_knowledge_compile_status(
+    id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
+    if not knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if not (
+        user.role == 'admin'
+        or knowledge.user_id == user.id
+        or await AccessGrants.has_access(
+            user_id=user.id,
+            resource_type='knowledge',
+            resource_id=knowledge.id,
+            permission='read',
+            db=db,
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    return _build_compile_response(knowledge)
+
+
+@router.post('/{id}/compile', response_model=KnowledgeCompileResponse)
+async def compile_knowledge_by_id(
+    id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
+    if not knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if (
+        knowledge.user_id != user.id
+        and not await AccessGrants.has_access(
+            user_id=user.id,
+            resource_type='knowledge',
+            resource_id=knowledge.id,
+            permission='write',
+            db=db,
+        )
+        and user.role != 'admin'
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    compile_meta = _get_compile_meta(knowledge.meta)
+    if compile_meta.get('status') in {'queued', 'running'}:
+        return _build_compile_response(knowledge)
+
+    files = await Knowledges.get_files_by_id(id, db=db)
+    job_id = str(uuid.uuid4())
+    await _update_compile_snapshot(
+        id,
+        status='queued',
+        job_id=job_id,
+        started_at=int(time.time()),
+        finished_at=None,
+        error=None,
+        asset_count=len(files),
+        page_count=0,
+    )
+
+    asyncio.create_task(_compile_knowledge_pages(id, job_id))
+
+    refreshed = await Knowledges.get_knowledge_by_id(id=id, db=db)
+    return _build_compile_response(refreshed or knowledge)
 
 
 ############################

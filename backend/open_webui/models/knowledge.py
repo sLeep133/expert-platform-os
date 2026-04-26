@@ -631,8 +631,8 @@ class KnowledgeTable:
             log.exception(e)
             return None
 
-    async def update_knowledge_data_by_id(
-        self, id: str, data: dict, db: Optional[AsyncSession] = None
+    async def update_knowledge_meta_by_id(
+        self, id: str, meta: dict, db: Optional[AsyncSession] = None
     ) -> Optional[KnowledgeModel]:
         try:
             async with get_async_db_context(db) as db:
@@ -640,12 +640,21 @@ class KnowledgeTable:
                     update(Knowledge)
                     .filter_by(id=id)
                     .values(
-                        data=data,
+                        meta=meta,
                         updated_at=int(time.time()),
                     )
                 )
                 await db.commit()
                 return await self.get_knowledge_by_id(id=id, db=db)
+        except Exception as e:
+            log.exception(e)
+            return None
+
+    async def update_knowledge_data_by_id(
+        self, id: str, data: dict, db: Optional[AsyncSession] = None
+    ) -> Optional[KnowledgeModel]:
+        try:
+            return await self.update_knowledge_meta_by_id(id=id, meta=data, db=db)
         except Exception as e:
             log.exception(e)
             return None

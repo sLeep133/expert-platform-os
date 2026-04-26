@@ -49,7 +49,10 @@
 	export let chat;
 	export let history;
 	export let selectedModels;
+	export let experts = [];
+	export let selectedExpertId = '';
 	export let showModelSelector = true;
+	export let onSelectExpert: (expertId: string) => void = () => {};
 
 	export let onSaveTempChat: () => {};
 	export let archiveChatHandler: (id: string) => void;
@@ -111,9 +114,26 @@
 			{$showSidebar ? 'ml-1' : ''}
 			"
 				>
-					{#if showModelSelector}
-						<ModelSelector bind:selectedModels showSetDefault={!shareEnabled} />
-					{/if}
+					<div class="flex flex-col gap-2 md:flex-row md:items-center">
+						{#if showModelSelector}
+							<div class="min-w-0 flex-1">
+								<ModelSelector bind:selectedModels showSetDefault={!shareEnabled} />
+							</div>
+						{/if}
+
+						<div class="shrink-0 min-w-[180px] max-w-full">
+							<select
+								class="w-full text-sm rounded-xl border border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-gray-900 px-3 py-2 text-gray-700 dark:text-gray-200 outline-hidden"
+								bind:value={selectedExpertId}
+								on:change={(e) => onSelectExpert(e.currentTarget.value)}
+							>
+								<option value="">无专家</option>
+								{#each experts as expert}
+									<option value={expert.id}>{expert.name}</option>
+								{/each}
+							</select>
+						</div>
+					</div>
 				</div>
 
 				<div class="self-start flex flex-none items-center text-gray-600 dark:text-gray-400">

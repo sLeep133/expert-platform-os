@@ -94,6 +94,7 @@
 	import { createOpenAITextStream } from '$lib/apis/streaming';
 	import { getFunctions } from '$lib/apis/functions';
 	import { updateFolderById } from '$lib/apis/folders';
+	import { getExperts, type Expert } from '$lib/apis/experts';
 
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -143,6 +144,9 @@
 	} else {
 		selectedModelIds = selectedModels;
 	}
+
+	let selectedExpertId = '';
+	let experts: Expert[] = [];
 
 	let selectedToolIds = [];
 	let selectedFilterIds = [];
@@ -769,6 +773,8 @@
 		);
 
 		const init = async () => {
+			await loadExperts();
+
 			if (!chatIdProp) {
 				loading = false;
 				await tick();
@@ -1071,6 +1077,63 @@
 		artifactContents.set(contents);
 	};
 
+	const loadExperts = async () => {
+		experts = await getExperts(localStorage.token).catch((error) => {
+			console.error('Failed to load experts', error);
+			return [];
+		});
+
+		if (
+			!chatIdProp &&
+			selectedExpertId &&
+			!($page.url.searchParams.get('models') || $page.url.searchParams.get('model'))
+		) {
+			const expert = experts.find((item) => item.id === selectedExpertId);
+			if (expert?.runtime_model && $models.some((model) => model.id === expert.runtime_model)) {
+				selectedModels = [expert.runtime_model];
+			}
+		}
+	};
+
+	const syncSelectedExpertInUrl = () => {
+		if (typeof window === 'undefined' || window.location.pathname.includes('/c/')) {
+			return;
+		}
+
+		const url = new URL(window.location.href);
+		if (selectedExpertId) {
+			url.searchParams.set('expert', selectedExpertId);
+		} else {
+			url.searchParams.delete('expert');
+		}
+
+		window.history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+	};
+
+	const applyExpertSelection = async (expertId: string) => {
+		selectedExpertId = expertId;
+		syncSelectedExpertInUrl();
+
+		const expert = experts.find((item) => item.id === expertId);
+		if (expert?.runtime_model && $models.some((model) => model.id === expert.runtime_model)) {
+			selectedModels = [expert.runtime_model];
+		}
+
+		if ($chatId && !$temporaryChatEnabled) {
+			await updateChatById(localStorage.token, $chatId, {
+				models: selectedModels,
+				expert_id: selectedExpertId || undefined,
+				history,
+				messages: createMessagesList(history, history.currentId),
+				params,
+				files: chatFiles
+			}).catch((error) => {
+				console.error('Failed to persist expert selection', error);
+				return null;
+			});
+		}
+	};
+
 	//////////////////////////
 	// Web functions
 	//////////////////////////
@@ -1099,6 +1162,18 @@
 			.map((m) => m.id);
 
 		const defaultModels = $config?.default_models ? $config?.default_models.split(',') : [];
+
+		selectedExpertId = $page.url.searchParams.get('expert') ?? '';
+		if (selectedExpertId && experts.length > 0) {
+			const urlExpert = experts.find((expert) => expert.id === selectedExpertId);
+			if (
+				urlExpert?.runtime_model &&
+				!($page.url.searchParams.get('models') || $page.url.searchParams.get('model')) &&
+				$models.some((model) => model.id === urlExpert.runtime_model)
+			) {
+				selectedModels = [urlExpert.runtime_model];
+			}
+		}
 
 		if ($page.url.searchParams.get('models') || $page.url.searchParams.get('model')) {
 			const urlModels = (
@@ -1185,7 +1260,8 @@
 		await showArtifacts.set(false);
 
 		if ($page.url.pathname.includes('/c/')) {
-			window.history.replaceState(history.state, '', `/`);
+			const expertQuery = selectedExpertId ? `?expert=${encodeURIComponent(selectedExpertId)}` : '';
+			window.history.replaceState(history.state, '', `/${expertQuery}`);
 		}
 
 		autoScroll = true;
@@ -1352,6 +1428,7 @@
 				chatTitle.set(chatContent.title);
 
 				params = chatContent?.params ?? {};
+				selectedExpertId = chatContent?.expert_id ?? '';
 				chatFiles = chatContent?.files ?? [];
 
 				// Load tasks from chat-level DB field
@@ -1499,6 +1576,7 @@
 					models: selectedModels,
 					messages: messages,
 					history: history,
+					expert_id: selectedExpertId || undefined,
 					params: params,
 					files: chatFiles
 				});
@@ -1648,7 +1726,7 @@
 	};
 
 	const chatCompletionEventHandler = async (data, message, chatId) => {
-		const { id, done, choices, content, output, sources, selected_model_id, error, usage } = data;
+		const { id, done, choices, content, output, sources, selected_model_id, expert_context, error, usage } = data;
 
 		// Store raw OR-aligned output items from backend
 		if (output) {
@@ -1748,6 +1826,10 @@
 
 		if (usage) {
 			message.usage = usage;
+		}
+
+		if (expert_context) {
+			message.expertContext = expert_context;
 		}
 
 		history.messages[message.id] = message;
@@ -2310,6 +2392,7 @@
 				stream: stream,
 				model: model.id,
 				...(messages.length > 0 ? { messages } : {}),
+				expert_id: selectedExpertId || undefined,
 				params: {
 					...$settings?.params,
 					...params,
@@ -2671,6 +2754,7 @@
 					id: _chatId,
 					title: $i18n.t('New Chat'),
 					models: selectedModels,
+					expert_id: selectedExpertId || undefined,
 					system: $settings.system ?? undefined,
 					params: params,
 					history: history,
@@ -2706,6 +2790,7 @@
 			if (!$temporaryChatEnabled) {
 				chat = await updateChatById(localStorage.token, _chatId, {
 					models: selectedModels,
+					expert_id: selectedExpertId || undefined,
 					history: history,
 					messages: createMessagesList(history, history.currentId),
 					params: params,
@@ -2857,6 +2942,9 @@
 						{history}
 						title={$chatTitle}
 						bind:selectedModels
+						bind:selectedExpertId
+						{experts}
+						onSelectExpert={applyExpertSelection}
 						shareEnabled={!!history.currentId}
 						{initNewChat}
 						{archiveChatHandler}
@@ -2877,6 +2965,7 @@
 										id: uuidv4(),
 										title: title.length > 50 ? `${title.slice(0, 50)}...` : title,
 										models: selectedModels,
+										expert_id: selectedExpertId || undefined,
 										params: params,
 										history: history,
 										messages: messages,

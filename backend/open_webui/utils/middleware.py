@@ -29,6 +29,9 @@ from open_webui.utils.misc import is_string_allowed
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.chats import Chats
 from open_webui.models.folders import Folders
+from open_webui.models.access_grants import AccessGrants
+from open_webui.models.experts import Experts
+from open_webui.models.knowledge import Knowledges
 from open_webui.models.users import Users
 from open_webui.socket.main import (
     get_event_call,
@@ -167,6 +170,116 @@ DEFAULT_CODE_INTERPRETER_TAGS = [('<code_interpreter>', '</code_interpreter>')]
 def output_id(prefix: str) -> str:
     """Generate OR-style ID: prefix + 24-char hex UUID."""
     return f'{prefix}_{uuid4().hex[:24]}'
+
+
+def _expert_section(title: str, lines: list[str]) -> str:
+    cleaned = [line.strip() for line in lines if isinstance(line, str) and line.strip()]
+    if not cleaned:
+        return ''
+    return f'{title}:\n' + '\n'.join(f'- {line}' for line in cleaned)
+
+
+async def build_expert_runtime_context(expert_id: str, user: UserModel) -> Optional[dict]:
+    expert = await Experts.get_expert_by_id(expert_id)
+    if not expert:
+        return None
+
+    if expert.user_id != user.id and expert.visibility != 'shared' and user.role != 'admin':
+        return None
+
+    sections = [
+        _expert_section(
+            'Expert Persona',
+            [
+                f'Name: {expert.name}',
+                f'Role: {expert.persona_role}' if expert.persona_role else '',
+                f'Tone: {expert.persona_tone}' if expert.persona_tone else '',
+                f'Style: {expert.persona_style}' if expert.persona_style else '',
+            ],
+        ),
+        _expert_section('Constraints', expert.persona_constraints or []),
+        _expert_section('Method Principles', expert.method_principles or []),
+        _expert_section('Workflows', expert.method_workflows or []),
+        _expert_section('Output Preferences', expert.method_output_preferences or []),
+    ]
+
+    wiki_pages = []
+    injected_pages = []
+    for knowledge_id in expert.knowledge_spaces or []:
+        knowledge = await Knowledges.get_knowledge_by_id(id=knowledge_id)
+        if not knowledge:
+            continue
+
+        if knowledge.user_id != user.id and user.role != 'admin':
+            has_access = await AccessGrants.has_access(
+                user_id=user.id,
+                resource_type='knowledge',
+                resource_id=knowledge_id,
+                permission='read',
+            )
+            if not has_access:
+                continue
+
+        expert_platform = (knowledge.meta or {}).get('expert_platform', {})
+        compile_meta = expert_platform.get('compile', {}) or {}
+        wiki_meta = expert_platform.get('wiki', {}) or {}
+        pages = wiki_meta.get('pages', []) or []
+
+        if compile_meta.get('status') != 'completed' or not pages:
+            continue
+
+        pinned_pages = set(expert.knowledge_pinned_pages or [])
+        selected_pages = [
+            page for page in pages if not pinned_pages or page.get('id') in pinned_pages
+        ]
+        if not selected_pages:
+            selected_pages = pages[:5]
+        else:
+            selected_pages = selected_pages[:10]
+
+        for page in selected_pages:
+            title = (page.get('title') or 'Untitled').strip()
+            summary = (page.get('summary') or page.get('excerpt') or '').strip()
+            source_name = (page.get('source_name') or knowledge.name).strip()
+            wiki_pages.append(
+                '\n'.join(
+                    [
+                        f'Title: {title}',
+                        f'Source Space: {knowledge.name}',
+                        f'Source File: {source_name}',
+                        f'Summary: {summary or "No summary available."}',
+                    ]
+                )
+            )
+            injected_pages.append(
+                {
+                    'knowledge_id': knowledge.id,
+                    'knowledge_name': knowledge.name,
+                    'page_id': page.get('id'),
+                    'title': title,
+                    'source_name': source_name,
+                }
+            )
+
+    if wiki_pages:
+        sections.append(
+            'Compiled Wiki Context:\n'
+            + '\n\n'.join(f'[{idx + 1}]\n{page}' for idx, page in enumerate(wiki_pages[:10]))
+        )
+
+    if expert.system_prompt:
+        sections.append(f'Expert System Prompt:\n{expert.system_prompt.strip()}')
+
+    sections = [section for section in sections if section]
+    if not sections:
+        return None
+
+    return {
+        'expert_id': expert.id,
+        'expert_name': expert.name,
+        'context': '<expert_runtime_context>\n' + '\n\n'.join(sections) + '\n</expert_runtime_context>',
+        'injected_pages': injected_pages,
+    }
 
 
 def _split_tool_calls(
@@ -2327,6 +2440,22 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     # Native FC: skip RAG injection, builtin tools
                     # will read folder knowledge from metadata.
                     metadata['folder_knowledge'] = folder.data['files']
+
+    expert_id = metadata.get('expert_id')
+    if expert_id:
+        expert_context = await build_expert_runtime_context(expert_id, user)
+        if expert_context:
+            metadata['expert_context'] = {
+                'expert_id': expert_context['expert_id'],
+                'expert_name': expert_context['expert_name'],
+                'injected_pages': expert_context['injected_pages'],
+            }
+            form_data['messages'] = add_or_update_system_message(
+                expert_context['context'],
+                form_data['messages'],
+                append=True,
+            )
+            events.append({'expert_context': metadata['expert_context']})
 
     # Model "Knowledge" handling
     user_message = get_last_user_message(form_data['messages'])
