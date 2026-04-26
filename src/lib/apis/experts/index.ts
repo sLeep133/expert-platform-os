@@ -48,6 +48,7 @@ description?: string | null;
 avatar?: string | null;
 tags: string[];
 visibility: string;
+wiki_root?: string | null;
 persona_role?: string | null;
 persona_tone?: string | null;
 persona_style?: string | null;
@@ -200,6 +201,228 @@ export const duplicateExpertById = async (token: string, id: string): Promise<Ex
 let error = null;
 
 const res = await fetch(`${WEBUI_API_BASE_URL}/experts/${id}/duplicate`, {
+method: 'POST',
+headers: {
+Accept: 'application/json',
+'Content-Type': 'application/json',
+authorization: `Bearer ${token}`
+}
+})
+.then(parseJson)
+.catch((err) => {
+error = getErrorMessage(err);
+console.error(err);
+return null;
+});
+
+if (error) throw error;
+return res;
+};
+
+// ==================== Wiki API ====================
+
+export type WikiStatus = {
+expert_id: string;
+wiki_root: string;
+raw_files: number;
+wiki_pages: number;
+index_exists: boolean;
+log_exists: boolean;
+purpose_exists: boolean;
+};
+
+export type WikiPage = {
+path: string;
+title: string;
+content: string;
+page_type: string;
+sources: string[];
+links: string[];
+};
+
+export type CompileStatus = {
+expert_id: string;
+status: string;
+pages: any[];
+errors: string[];
+duration: number;
+};
+
+export type WikiHealthReport = {
+wiki_root: string;
+total_pages: number;
+issues: Array<{
+rule_id: string;
+severity: string;
+pages?: string[];
+links?: Array<{ from: string; link: string }>;
+}>;
+};
+
+export const getExpertWikiStatus = async (token: string, id: string): Promise<WikiStatus> => {
+let error = null;
+
+const res = await fetch(`${WEBUI_API_BASE_URL}/experts/${id}/wiki/status`, {
+method: 'GET',
+headers: {
+Accept: 'application/json',
+'Content-Type': 'application/json',
+authorization: `Bearer ${token}`
+}
+})
+.then(parseJson)
+.catch((err) => {
+error = getErrorMessage(err);
+console.error(err);
+return null;
+});
+
+if (error) throw error;
+return res;
+};
+
+export const listExpertWikiPages = async (token: string, id: string): Promise<{ expert_id: string; pages: WikiPage[] }> => {
+let error = null;
+
+const res = await fetch(`${WEBUI_API_BASE_URL}/experts/${id}/wiki/pages`, {
+method: 'GET',
+headers: {
+Accept: 'application/json',
+'Content-Type': 'application/json',
+authorization: `Bearer ${token}`
+}
+})
+.then(parseJson)
+.catch((err) => {
+error = getErrorMessage(err);
+console.error(err);
+return null;
+});
+
+if (error) throw error;
+return res;
+};
+
+export const readExpertWikiPage = async (token: string, id: string, path: string): Promise<{ expert_id: string; path: string; content: string }> => {
+let error = null;
+
+const res = await fetch(`${WEBUI_API_BASE_URL}/experts/${id}/wiki/page/${path}`, {
+method: 'GET',
+headers: {
+Accept: 'application/json',
+'Content-Type': 'application/json',
+authorization: `Bearer ${token}`
+}
+})
+.then(parseJson)
+.catch((err) => {
+error = getErrorMessage(err);
+console.error(err);
+return null;
+});
+
+if (error) throw error;
+return res;
+};
+
+export const uploadToExpertWiki = async (token: string, id: string, file: File): Promise<{ expert_id: string; file: string; path: string; size: number }> => {
+let error = null;
+
+const formData = new FormData();
+formData.append('file', file);
+
+const res = await fetch(`${WEBUI_API_BASE_URL}/experts/${id}/wiki/upload`, {
+method: 'POST',
+headers: {
+authorization: `Bearer ${token}`
+},
+body: formData
+})
+.then(parseJson)
+.catch((err) => {
+error = getErrorMessage(err);
+console.error(err);
+return null;
+});
+
+if (error) throw error;
+return res;
+};
+
+export const compileExpertWiki = async (token: string, id: string, filePath?: string): Promise<CompileStatus> => {
+let error = null;
+
+const formData = new FormData();
+if (filePath) {
+formData.append('file_path', filePath);
+}
+
+const res = await fetch(`${WEBUI_API_BASE_URL}/experts/${id}/wiki/compile`, {
+method: 'POST',
+headers: {
+authorization: `Bearer ${token}`
+},
+body: formData
+})
+.then(parseJson)
+.catch((err) => {
+error = getErrorMessage(err);
+console.error(err);
+return null;
+});
+
+if (error) throw error;
+return res;
+};
+
+export const getExpertWikiCompileStatus = async (token: string, id: string): Promise<{ expert_id: string; cache: any }> => {
+let error = null;
+
+const res = await fetch(`${WEBUI_API_BASE_URL}/experts/${id}/wiki/compile/status`, {
+method: 'GET',
+headers: {
+Accept: 'application/json',
+'Content-Type': 'application/json',
+authorization: `Bearer ${token}`
+}
+})
+.then(parseJson)
+.catch((err) => {
+error = getErrorMessage(err);
+console.error(err);
+return null;
+});
+
+if (error) throw error;
+return res;
+};
+
+export const getExpertWikiHealth = async (token: string, id: string): Promise<WikiHealthReport> => {
+let error = null;
+
+const res = await fetch(`${WEBUI_API_BASE_URL}/experts/${id}/wiki/health`, {
+method: 'GET',
+headers: {
+Accept: 'application/json',
+'Content-Type': 'application/json',
+authorization: `Bearer ${token}`
+}
+})
+.then(parseJson)
+.catch((err) => {
+error = getErrorMessage(err);
+console.error(err);
+return null;
+});
+
+if (error) throw error;
+return res;
+};
+
+export const triggerExpertWikiHealthCheck = async (token: string, id: string): Promise<WikiHealthReport> => {
+let error = null;
+
+const res = await fetch(`${WEBUI_API_BASE_URL}/experts/${id}/wiki/health-check`, {
 method: 'POST',
 headers: {
 Accept: 'application/json',

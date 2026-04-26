@@ -7,6 +7,7 @@ import Spinner from '$lib/components/common/Spinner.svelte';
 import Textarea from '$lib/components/common/Textarea.svelte';
 import type { Expert, ExpertForm } from '$lib/apis/experts';
 import { getKnowledgeBases, getKnowledgeById } from '$lib/apis/knowledge';
+import ExpertWikiTab from './ExpertWikiTab.svelte';
 
 export let expert: Expert | null = null;
 export let clone = false;
@@ -497,5 +498,11 @@ on:click={() => togglePinnedPage(page.id)}
 </div>
 </div>
 </details>
+
+{#if expert && expert.id}
+<div class="rounded-2xl border border-gray-100 dark:border-gray-900 bg-white dark:bg-gray-950 p-4">
+<ExpertWikiTab expertId={expert.id} />
+</div>
+{/if}
 </div>
 </div>

@@ -1,11 +1,14 @@
 import logging
+import os
 import time
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.users import User, UserModel, Users, UserResponse
+from open_webui.env import DATA_DIR
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import (
@@ -34,6 +37,9 @@ class Expert(Base):
     avatar = Column(Text, nullable=True)
     tags = Column(JSON, default=list)
     visibility = Column(Text, default='private')
+
+    # Wiki 根目录（每个 Expert 独立）
+    wiki_root = Column(Text, nullable=True)
 
     # Persona
     persona_role = Column(Text, nullable=True)
@@ -78,6 +84,9 @@ class ExpertModel(BaseModel):
     avatar: Optional[str] = None
     tags: list[str] = []
     visibility: str = 'private'
+
+    # Wiki 根目录（每个 Expert 独立）
+    wiki_root: Optional[str] = None
 
     # Persona
     persona_role: Optional[str] = None
@@ -179,6 +188,32 @@ import uuid
 
 
 class ExpertTable:
+    def _create_expert_wiki(self, expert_id: str) -> str:
+        """创建 Expert 的 Wiki 目录结构"""
+        wiki_root = DATA_DIR / 'experts' / expert_id
+        (wiki_root / 'raw' / 'articles').mkdir(parents=True, exist_ok=True)
+        (wiki_root / 'raw' / 'pdfs').mkdir(parents=True, exist_ok=True)
+        (wiki_root / 'raw' / 'notes').mkdir(parents=True, exist_ok=True)
+        (wiki_root / 'raw' / 'assets').mkdir(parents=True, exist_ok=True)
+        (wiki_root / 'wiki' / 'entities').mkdir(parents=True, exist_ok=True)
+        (wiki_root / 'wiki' / 'topics').mkdir(parents=True, exist_ok=True)
+        (wiki_root / 'wiki' / 'sources').mkdir(parents=True, exist_ok=True)
+        (wiki_root / 'wiki' / 'synthesis').mkdir(parents=True, exist_ok=True)
+        (wiki_root / 'wiki' / 'synthesis' / 'sessions').mkdir(parents=True, exist_ok=True)
+        # 创建 index.md
+        index_path = wiki_root / 'index.md'
+        if not index_path.exists():
+            index_path.write_text('# Wiki Index\n\n', encoding='utf-8')
+        # 创建 log.md
+        log_path = wiki_root / 'log.md'
+        if not log_path.exists():
+            log_path.write_text('# Operation Log\n\n', encoding='utf-8')
+        # 创建 purpose.md
+        purpose_path = wiki_root / 'purpose.md'
+        if not purpose_path.exists():
+            purpose_path.write_text('# Research Direction\n\n', encoding='utf-8')
+        return str(wiki_root)
+
     async def insert_new_expert(
         self, user_id: str, form_data: ExpertForm
     ) -> Optional[ExpertModel]:
@@ -190,6 +225,9 @@ class ExpertTable:
             method = form_data.method or MethodForm()
             runtime = form_data.runtime or RuntimeForm()
             knowledge_view = form_data.knowledge_view or KnowledgeViewForm()
+
+            # 创建 Expert Wiki 目录
+            wiki_root = self._create_expert_wiki(expert_id)
 
             expert = Expert(
                 id=expert_id,
@@ -215,6 +253,7 @@ class ExpertTable:
                 knowledge_pinned_pages=knowledge_view.pinned_pages,
                 knowledge_source_filters=knowledge_view.source_filters,
                 system_prompt=form_data.system_prompt,
+                wiki_root=wiki_root,
                 created_at=now,
                 updated_at=now,
             )

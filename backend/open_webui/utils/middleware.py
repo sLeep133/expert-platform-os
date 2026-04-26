@@ -75,6 +75,7 @@ from open_webui.models.functions import Functions
 from open_webui.models.models import Models
 
 from open_webui.retrieval.utils import get_sources_from_items
+from open_webui.knowledge.wiki import WikiRetriever
 
 
 from open_webui.utils.sanitize import sanitize_code
@@ -205,6 +206,43 @@ async def build_expert_runtime_context(expert_id: str, user: UserModel) -> Optio
 
     wiki_pages = []
     injected_pages = []
+
+    # 1. 首先加载 Expert 私有的 Wiki 内容
+    if expert.wiki_root:
+        retriever = WikiRetriever(expert.wiki_root)
+
+        # 获取所有 wiki 页面
+        all_pages = retriever.list_wiki_pages()
+
+        # 如果 expert 配置了 pinned_pages，从 Expert 的 wiki 中筛选
+        pinned_set = set(expert.knowledge_pinned_pages or [])
+        if pinned_set:
+            # 从 private wiki 中找匹配的页面
+            selected = [p for p in all_pages if p.path in pinned_set]
+            # 如果没有精确匹配，取前几个
+            if not selected:
+                selected = all_pages[:min(5, len(all_pages))]
+        else:
+            # 没有 pinned 配置时，读前10个页面
+            selected = all_pages[:10]
+
+        for page in selected:
+            # 提取内容的前500字符作为 summary
+            summary = page.content[:500] if page.content else "No content available."
+            wiki_pages.append(
+                f'Title: {page.title}\n'
+                f'Source: Expert Private Wiki\n'
+                f'Summary: {summary}'
+            )
+            injected_pages.append({
+                'knowledge_id': 'expert-wiki',
+                'knowledge_name': expert.name,
+                'page_id': page.path,
+                'title': page.title,
+                'source_name': 'Expert Private Wiki',
+            })
+
+    # 2. 然后加载共享知识空间的 Wiki
     for knowledge_id in expert.knowledge_spaces or []:
         knowledge = await Knowledges.get_knowledge_by_id(id=knowledge_id)
         if not knowledge:
