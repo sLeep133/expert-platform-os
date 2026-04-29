@@ -24,7 +24,6 @@ const i18n = getContext('i18n');
 let loading = true;
 let experts: Expert[] = [];
 let query = '';
-let activeTab: 'all' | 'mine' = 'all';
 let activeTag = '全部';
 let selectedExpert: Expert | null = null;
 let deleteTarget: Expert | null = null;
@@ -77,13 +76,7 @@ const formatDate = (timestamp: number) => {
 
 $: tagOptions = ['全部', ...Array.from(new Set(experts.flatMap((expert) => expert.tags ?? []))).slice(0, 10)];
 
-$: tabItems = [
-	{ id: 'all', label: '专家广场', count: experts.length },
-	{ id: 'mine', label: '我的专家', count: experts.filter((expert) => canManage(expert)).length }
-];
-
 $: filteredExperts = experts.filter((expert) => {
-	if (activeTab === 'mine' && !canManage(expert)) return false;
 	if (activeTag !== '全部' && !(expert.tags ?? []).includes(activeTag)) return false;
 	if (!query.trim()) return true;
 
@@ -176,22 +169,7 @@ onMount(async () => {
 
 	<div class="flex flex-col gap-4">
 		<div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-			<div class="flex items-center gap-1 overflow-x-auto scrollbar-none">
-				{#each tabItems as tab}
-					<button
-						type="button"
-						class="shrink-0 rounded-full px-4 py-2 text-sm transition {activeTab === tab.id
-							? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900'
-							: 'bg-white dark:bg-gray-950 border border-gray-100 dark:border-gray-900 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'}"
-						on:click={() => {
-							activeTab = tab.id as 'all' | 'mine';
-						}}
-					>
-						{tab.label}
-						<span class="ml-1 text-xs opacity-70">{tab.count}</span>
-					</button>
-				{/each}
-			</div>
+			<div class="flex items-center gap-1 overflow-x-auto scrollbar-none"></div>
 
 			<div class="relative w-full xl:max-w-sm">
 				<div class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">

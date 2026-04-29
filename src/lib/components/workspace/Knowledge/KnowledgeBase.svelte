@@ -142,6 +142,34 @@
 	let compilePollingTimer: ReturnType<typeof setInterval> | null = null;
 	let linkedExperts = [];
 	let loadingLinkedExperts = false;
+	let collapsedGroups: Record<string, boolean> = {};
+
+	const computeGroupedPages = (pages: any[]) => {
+		const groups: Record<string, { label: string; pages: any[] }> = {
+			entity: { label: '实体 (Entity)', pages: [] },
+			concept: { label: '概念 (Concept)', pages: [] },
+			topic: { label: '主题 (Topic)', pages: [] },
+			comparison: { label: '对比 (Comparison)', pages: [] },
+			query: { label: '查询 (Query)', pages: [] },
+			other: { label: '其他', pages: [] }
+		};
+		for (const page of pages) {
+			const type = page.page_type || 'other';
+			if (groups[type]) {
+				groups[type].pages.push(page);
+			} else {
+				groups.other.pages.push(page);
+			}
+		}
+		return Object.entries(groups)
+			.filter(([, g]) => g.pages.length > 0)
+			.map(([key, g]) => ({
+				key,
+				label: g.label,
+				pages: g.pages,
+				collapsed: collapsedGroups[key] ?? false
+			}));
+	};
 
 	const reset = () => {
 		currentPage = 1;
@@ -1127,18 +1155,39 @@
 				</div>
 
 				{#if wikiPages.length > 0}
-					<div class="mt-3 grid grid-cols-1 xl:grid-cols-2 gap-2">
-						{#each wikiPages as page}
-							<div class="rounded-xl border border-gray-100 dark:border-gray-900 px-3 py-2">
-								<div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-									{page.title}
-								</div>
-								<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-									{page.source_name} - {page.word_count} 字
-								</div>
-								<div class="mt-2 text-sm text-gray-600 dark:text-gray-300 line-clamp-3">
-									{page.summary}
-								</div>
+					{@const groupedPages = computeGroupedPages(wikiPages)}
+					<div class="mt-3 space-y-2">
+						{#each groupedPages as group}
+							{@const isCollapsed = collapsedGroups[group.key] ?? false}
+							<div class="rounded-xl border border-gray-100 dark:border-gray-800">
+								<button
+									type="button"
+									class="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900 rounded-t-xl transition"
+									on:click={() => {
+										collapsedGroups = { ...collapsedGroups, [group.key]: !collapsedGroups[group.key] };
+									}}
+								>
+									<span class="text-xs text-gray-400">{isCollapsed ? '▶' : '▼'}</span>
+									<span>{group.label}</span>
+									<span class="text-xs text-gray-400">({group.pages.length})</span>
+								</button>
+								{#if !isCollapsed}
+									<div class="grid grid-cols-1 xl:grid-cols-2 gap-2 p-3 pt-1">
+										{#each group.pages as page}
+											<div class="rounded-lg border border-gray-100 dark:border-gray-900 px-3 py-2">
+												<div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+													{page.title}
+												</div>
+												<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+													{page.source_name} - {page.word_count || 0} 字
+												</div>
+												<div class="mt-2 text-sm text-gray-600 dark:text-gray-300 line-clamp-3">
+													{page.summary || ''}
+												</div>
+											</div>
+										{/each}
+									</div>
+								{/if}
 							</div>
 						{/each}
 					</div>
