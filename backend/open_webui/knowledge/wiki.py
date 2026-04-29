@@ -181,6 +181,7 @@ class WikiRetriever:
 
         for path in target_dir.rglob("*.md"):
             relative_path = path.relative_to(self.wiki_root)
+            full_content = self.read_wiki_page(str(relative_path))
             content = self.read_page_content(path)
             if content:
                 # 从文件名或内容提取标题
@@ -191,12 +192,27 @@ class WikiRetriever:
                         title = line[2:].strip()
                         break
 
+                # 提取 wikilinks [[...]]
+                links = re.findall(r"\[\[(.+?)\]\]", content)
+
+                # 提取 sources（从 frontmatter 如果有）
+                sources = []
+                if full_content and full_content.startswith("---"):
+                    parts = full_content.split("---", 2)
+                    if len(parts) >= 3:
+                        frontmatter = parts[1]
+                        for line in frontmatter.split("\n"):
+                            if line.startswith("- "):
+                                sources.append(line[2:].strip())
+
                 pages.append(
                     WikiPage(
                         path=str(relative_path),
                         title=title,
                         content=content,
                         page_type=path.parent.name,
+                        links=links,
+                        sources=sources,
                     )
                 )
 
