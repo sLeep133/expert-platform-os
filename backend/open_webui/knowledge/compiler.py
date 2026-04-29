@@ -328,12 +328,6 @@ class WikiCompiler:
         except Exception as e:
             log.error(f"Failed to read excel {file_path}: {e}")
             return f"[Excel 文件读取失败: {e}]"
-            return CompileResult(
-                expert_id=self.expert_id,
-                status="failed",
-                errors=[str(e)],
-                duration=time.time() - start_time,
-            )
 
     async def compile_all(self) -> CompileResult:
         """编译 raw 目录下所有文件（两阶段：分析→生成）"""
@@ -389,6 +383,9 @@ class WikiCompiler:
 
         # 保存关系图谱
         self._save_entity_graph()
+
+        # 生成跨文档综合页面
+        await self._generate_synthesis_pages(all_pages)
 
         return CompileResult(
             expert_id=self.expert_id,
@@ -616,6 +613,73 @@ sources:
         lines.append("")
 
         index_path.write_text("\n".join(lines), encoding="utf-8")
+
+    async def _generate_synthesis_pages(self, all_pages: list[dict]):
+        """
+        生成跨文档综合页面
+
+        创建：
+        1. 知识库索引页 - 包含所有页面的 wikilinks
+        2. 实体关系总览页 - 展示 entity-concept 关系图
+        """
+        if not all_pages and not self._entity_graph:
+            return
+
+        synthesis_dir = self.wiki_dir / "synthesis"
+        synthesis_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. 生成知识库索引页
+        index_content = f"""---
+title: 知识库索引
+type: synthesis
+---
+
+# 知识库索引
+
+本知识库包含 {len(all_pages)} 个页面。
+
+## 实体
+
+"""
+        for entity in sorted(self._global_entities):
+            index_content += f"- [[{entity}]]\n"
+
+        index_content += "\n## 概念\n\n"
+        for concept in sorted(self._global_concepts):
+            index_content += f"- [[{concept}]]\n"
+
+        index_content += "\n## 所有页面\n\n"
+        for page in all_pages:
+            index_content += f"- [[{page['title']}]]\n"
+
+        (synthesis_dir / "index.md").write_text(index_content, encoding="utf-8")
+
+        # 2. 生成实体关系总览页
+        graph_content = f"""---
+title: 实体关系图
+type: synthesis
+---
+
+# 实体关系图
+
+本知识库包含 {len(self._entity_graph)} 个实体节点。
+
+"""
+        for entity, data in sorted(self._entity_graph.items()):
+            graph_content += f"## {entity}\n\n"
+            if data.get("concepts"):
+                graph_content += f"**概念**: {', '.join(data['concepts'])}\n\n"
+            if data.get("topics"):
+                graph_content += f"**主题**: {', '.join(data['topics'])}\n\n"
+            if data.get("related_entities"):
+                graph_content += f"**关联实体**: "
+                graph_content += ", ".join([f"[[{r}]]" for r in data["related_entities"]])
+                graph_content += "\n\n"
+            graph_content += "---\n\n"
+
+        (synthesis_dir / "entity-graph.md").write_text(graph_content, encoding="utf-8")
+
+        log.info(f"Generated synthesis pages in {synthesis_dir}")
 
     async def trigger_compile(self, file_path: str = None):
         """触发编译（供 API 调用）"""
