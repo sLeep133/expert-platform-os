@@ -138,6 +138,15 @@
 			<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC-BY 4.0</a>.
 		</div>
 
+		<div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+			<div class="font-medium mb-1">核心特性</div>
+			<div class="space-y-0.5">
+				<div>• 基于 Karpathy llm-wiki 方法论</div>
+				<div>• Obsidian 兼容，支持双向链接</div>
+				<div>• 知识图谱，语义检索</div>
+			</div>
+		</div>
+
 		<div>
 			<pre
 				class="text-xs text-gray-400 dark:text-gray-500">Copyright (c) {new Date().getFullYear()} Expert Platform OS. MIT License.
