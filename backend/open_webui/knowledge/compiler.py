@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -73,7 +74,91 @@ class WikiCompiler:
         self.wiki_root = DATA_DIR / "experts" / expert_id
         self.raw_dir = self.wiki_root / "raw"
         self.wiki_dir = self.wiki_root / "wiki"
+        self.graph_dir = self.wiki_root / "graph"
         self._cache_file = self.wiki_root / ".wiki-cache.json"
+
+        # 全局实体/概念表（跨文档共享，用于 wikilinks）
+        self._global_entities: set[str] = set()
+        self._global_concepts: set[str] = set()
+
+        # Entity-Concept 关系图谱
+        self._entity_graph: dict[str, dict] = {}
+
+    def _update_entity_graph(self, analysis: dict):
+        """更新实体关系图谱"""
+        entities = analysis.get("key_entities", [])
+        concepts = analysis.get("key_concepts", [])
+        relationships = analysis.get("relationships", [])
+
+        for entity in entities:
+            if entity not in self._entity_graph:
+                self._entity_graph[entity] = {
+                    "related_entities": [],
+                    "concepts": [],
+                    "topics": [],
+                    "sources": []
+                }
+            # 记录关联的概念
+            for concept in concepts:
+                if concept not in self._entity_graph[entity]["concepts"]:
+                    self._entity_graph[entity]["concepts"].append(concept)
+            # 记录关联的主题
+            for topic in analysis.get("topics", []):
+                if topic not in self._entity_graph[entity]["topics"]:
+                    self._entity_graph[entity]["topics"].append(topic)
+            # 记录关联的实体
+            for rel in relationships:
+                if rel not in self._entity_graph[entity]["related_entities"]:
+                    self._entity_graph[entity]["related_entities"].append(rel)
+
+    def _save_entity_graph(self):
+        """保存关系图谱到 graph/ 目录"""
+        if not self._entity_graph:
+            return
+
+        self.graph_dir.mkdir(parents=True, exist_ok=True)
+
+        # 保存主图谱文件
+        graph_file = self.graph_dir / "entity-graph.json"
+        graph_file.write_text(
+            json.dumps(self._entity_graph, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+
+        # 保存全局实体/概念列表（用于 wikilinks 匹配）
+        vocabulary_file = self.graph_dir / "vocabulary.json"
+        vocabulary = {
+            "entities": sorted(list(self._global_entities)),
+            "concepts": sorted(list(self._global_concepts))
+        }
+        vocabulary_file.write_text(
+            json.dumps(vocabulary, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+
+        log.info(f"Saved entity graph with {len(self._entity_graph)} entities to {self.graph_dir}")
+
+    def _insert_wikilinks(self, content: str) -> str:
+        """
+        在内容中插入 wikilinks [[...]]
+
+        将文本中的实体名和概念名转换为 [[wikilink]] 格式
+        """
+        # 按长度降序排列（避免短名称先匹配导致长名称无法匹配）
+        all_terms = sorted(
+            list(self._global_entities) + list(self._global_concepts),
+            key=len,
+            reverse=True
+        )
+
+        for term in all_terms:
+            # 精确匹配单词边界，避免部分匹配
+            # 例如 "Python" 不会匹配 "Pythonista"
+            pattern = rf'\b{re.escape(term)}\b'
+            replacement = f'[[{term}]]'
+            content = re.sub(pattern, replacement, content)
+
+        return content
 
     def _load_cache(self) -> dict:
         """加载增量缓存"""
@@ -251,10 +336,11 @@ class WikiCompiler:
             )
 
     async def compile_all(self) -> CompileResult:
-        """编译 raw 目录下所有文件"""
+        """编译 raw 目录下所有文件（两阶段：分析→生成）"""
         start_time = time.time()
         all_pages = []
         errors = []
+        all_files = []
 
         if not self.raw_dir.exists():
             return CompileResult(
@@ -264,13 +350,45 @@ class WikiCompiler:
                 duration=time.time() - start_time,
             )
 
-        # 遍历 raw 目录下所有文件
+        # 收集所有文件
         for file_path in self.raw_dir.rglob('*'):
             if file_path.is_file() and not file_path.name.startswith('.'):
-                result = await self.compile_file(str(file_path))
-                if result.status == "failed":
-                    errors.extend(result.errors)
-                all_pages.extend(result.pages)
+                all_files.append(file_path)
+
+        # 第一阶段：分析所有文件，收集全局实体/概念
+        log.info(f"Stage 1: Analyzing {len(all_files)} files for entities/concepts...")
+        analyses = []
+        for file_path in all_files:
+            try:
+                content = self._read_file_content(file_path)
+                analysis = await self._step1_analyze(content, file_path.name)
+
+                # 收集实体和概念
+                for entity in analysis.get("key_entities", []):
+                    self._global_entities.add(entity)
+                for concept in analysis.get("key_concepts", []):
+                    self._global_concepts.add(concept)
+
+                # 更新关系图谱
+                self._update_entity_graph(analysis)
+
+                analyses.append((file_path, analysis))
+            except Exception as e:
+                log.error(f"Failed to analyze {file_path}: {e}")
+                errors.append(str(e))
+
+        # 第二阶段：生成 Wiki 页面（带 wikilinks）
+        log.info(f"Stage 2: Generating {len(analyses)} wiki pages with wikilinks...")
+        for file_path, analysis in analyses:
+            try:
+                pages = await self._step2_generate(analysis, file_path)
+                all_pages.extend(pages)
+            except Exception as e:
+                log.error(f"Failed to generate wiki for {file_path}: {e}")
+                errors.append(str(e))
+
+        # 保存关系图谱
+        self._save_entity_graph()
 
         return CompileResult(
             expert_id=self.expert_id,
@@ -302,8 +420,14 @@ class WikiCompiler:
 - key_entities: 关键实体列表（人名、地点、机构、技术名词等，最多10个）
 - key_concepts: 关键概念列表（最重要的核心概念，最多10个）
 - topics: 主题标签列表（3-5个主题）
-- suggested_page_type: 建议的页面类型（topic/entity/source/synthesis）
-- relationships: 关键关系描述（可选，描述实体之间的关系）
+- suggested_page_type: 建议的页面类型（topic/entity/source/synthesis/comparison/query）
+  - topic: 普通主题页面
+  - entity: 实体页面（人物、地点、具体事物）
+  - source: 原始资料页面
+  - synthesis: 综合分析页面
+  - comparison: 对比页面（当文档对比多个事物时，如 A vs B）
+  - query: 查询页面（当文档包含问答/FAQ类内容时）
+- relationships: 关键关系描述（可选，描述实体之间的关系，如 "A 和 B 的区别"、"C 是 D 的子概念"）
 
 直接返回 JSON，不要有额外解释。"""
 
@@ -400,6 +524,9 @@ class WikiCompiler:
         except Exception as e:
             log.error(f"Step 2 generation failed: {e}")
             page_content = self._generate_fallback_page(title, analysis, source_file, page_type)
+
+        # 插入 wikilinks（将实体/概念名转换为 [[wikilink]] 格式）
+        page_content = self._insert_wikilinks(page_content)
 
         # 确保 frontmatter 存在
         if not page_content.startswith("---"):

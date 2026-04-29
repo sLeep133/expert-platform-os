@@ -430,6 +430,8 @@ def ensure_wiki_structure(expert_id: str) -> Path:
         "wiki/topics",
         "wiki/sources",
         "wiki/synthesis/sessions",
+        "wiki/comparison",
+        "wiki/query",
     ]
 
     for d in dirs:
