@@ -24,33 +24,9 @@ async def call_llm(
     Returns:
         LLM 生成的文本内容
     """
-    try:
-        from open_webui.utils.chat import generate_chat_completion
-        from starlette.datastructures import State
-        from dataclasses import dataclass
-        from starlette.requests import Request
-        from unittest.mock import MagicMock
-
-        # 获取默认模型
-        if not model:
-            from open_webui.config import DEFAULT_MODEL
-            model = DEFAULT_MODEL.value if hasattr(DEFAULT_MODEL, 'value') else DEFAULT_MODEL
-
-        # 构造 form_data
-        form_data = {
-            "model": model,
-            "messages": messages,
-            "stream": False,
-        }
-
-        # 创建一个模拟的 Request 对象
-        # 由于 generate_chat_completion 内部主要读取 app.state.config 和 app.state.MODELS
-        # 我们需要直接使用 Ollama 的原始 API 调用
-        raise NotImplementedError("需要使用其他方式调用")
-
-    except NotImplementedError:
-        # 降级方案：直接调用 Ollama API
-        return await _call_ollama_direct(messages, model)
+    system = messages[0]["content"] if messages and messages[0]["role"] == "system" else None
+    user_prompt = messages[-1]["content"] if messages else ""
+    return await call_llm_api(user_prompt, system=system, model=model)
 
 
 async def _call_ollama_direct(
@@ -65,7 +41,9 @@ async def _call_ollama_direct(
     from open_webui.config import OLLAMA_BASE_URL
 
     if not model:
-        model = os.getenv("OLLAMA_MODEL", "deepseek-r1:14b")
+        model = DEFAULT_MODELS.value if hasattr(DEFAULT_MODELS, 'value') else DEFAULT_MODELS
+        if not model:
+            model = os.getenv("OLLAMA_MODEL")
 
     # 获取 Ollama URL
     base_url = OLLAMA_BASE_URL.value if hasattr(OLLAMA_BASE_URL, 'value') else OLLAMA_BASE_URL
@@ -100,6 +78,188 @@ async def _call_ollama_direct(
         raise
 
 
+def _get_model_from_config() -> Optional[str]:
+    """
+    从 Open WebUI 配置数据库中读取已启用的大模型
+    """
+    try:
+        import json
+        import os
+        import sqlite3
+
+        db_path = os.getenv("WEBUI_DB_PATH", "/app/backend/data/webui.db")
+        if not os.path.exists(db_path):
+            return None
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT data FROM config ORDER BY id DESC LIMIT 1")
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row or not row[0]:
+            return None
+
+        config = json.loads(row[0])
+
+        # 1. 尝试从 openai 配置中读取启用的模型
+        openai_cfg = config.get("openai", {})
+        if openai_cfg.get("enable"):
+            api_configs = openai_cfg.get("api_configs", {})
+            for cfg in api_configs.values():
+                if cfg.get("enable"):
+                    model_ids = cfg.get("model_ids", [])
+                    if model_ids:
+                        return model_ids[0]
+
+        # 2. 尝试从 direct 配置中读取
+        direct_cfg = config.get("direct", {})
+        if direct_cfg.get("enable"):
+            api_configs = direct_cfg.get("api_configs", {})
+            for cfg in api_configs.values():
+                if cfg.get("enable"):
+                    model_ids = cfg.get("model_ids", [])
+                    if model_ids:
+                        return model_ids[0]
+
+        # 3. 尝试从 ollama 配置中读取
+        ollama_cfg = config.get("ollama", {})
+        if ollama_cfg.get("enable"):
+            api_configs = ollama_cfg.get("api_configs", {})
+            for cfg in api_configs.values():
+                if cfg.get("enable"):
+                    model_ids = cfg.get("model_ids", [])
+                    if model_ids:
+                        return model_ids[0]
+
+        return None
+    except Exception as e:
+        log.warning(f"Failed to read model from config db: {e}")
+        return None
+
+
+def _get_openai_credentials_from_config() -> tuple[Optional[str], Optional[str]]:
+    """
+    从 Open WebUI 配置数据库中读取 OpenAI 兼容 API 的 key 和 base_url
+    """
+    try:
+        import json
+        import os
+        import sqlite3
+
+        db_path = os.getenv("WEBUI_DB_PATH", "/app/backend/data/webui.db")
+        if not os.path.exists(db_path):
+            return None, None
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT data FROM config ORDER BY id DESC LIMIT 1")
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row or not row[0]:
+            return None, None
+
+        config = json.loads(row[0])
+        openai_cfg = config.get("openai", {})
+
+        if openai_cfg.get("enable"):
+            api_keys = openai_cfg.get("api_keys", [])
+            api_base_urls = openai_cfg.get("api_base_urls", [])
+            key = api_keys[0] if api_keys else None
+            base_url = api_base_urls[0] if api_base_urls else None
+            return key, base_url
+
+        return None, None
+    except Exception as e:
+        log.warning(f"Failed to read openai credentials from config db: {e}")
+        return None, None
+
+
+async def call_llm_api(
+    prompt: str,
+    system: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
+    """
+    调用用户配置的默认模型（支持 Ollama / OpenAI 兼容 API / Anthropic）
+    """
+    import os
+    import aiohttp
+    from open_webui.config import OLLAMA_BASE_URL, DEFAULT_MODELS
+
+    if not model:
+        model = DEFAULT_MODELS.value if hasattr(DEFAULT_MODELS, 'value') else DEFAULT_MODELS
+        if not model:
+            model = os.getenv("OLLAMA_MODEL")
+        if not model:
+            # 尝试从 Open WebUI 配置数据库中读取已配置的模型
+            model = _get_model_from_config()
+
+    if not model:
+        raise ValueError(
+            "未配置默认模型。请在 Open WebUI 设置中配置 DEFAULT_MODELS，"
+            "或设置 OLLAMA_MODEL 环境变量。"
+        )
+
+    log.info(f"call_llm_api using model={model}")
+
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    # 判断模型类型
+    is_ollama = any(prefix in model.lower() for prefix in ["llama", "mistral", "deepseek", "qwen", "phi", "gemma", "codellama", "nomic"])
+
+    if is_ollama:
+        # Ollama 模型
+        base_url = OLLAMA_BASE_URL.value if hasattr(OLLAMA_BASE_URL, 'value') else OLLAMA_BASE_URL
+        if not base_url:
+            base_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+        if base_url == "/ollama":
+            base_url = "http://ollama:11434"
+        elif base_url and not base_url.startswith("http"):
+            base_url = f"http://{base_url}:11434"
+
+        url = f"{base_url}/api/chat"
+        payload = {"model": model, "messages": messages, "stream": False}
+        timeout = aiohttp.ClientTimeout(total=120)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload) as response:
+                result = await response.json()
+                return result.get("message", {}).get("content", "")
+    else:
+        # OpenAI 兼容 API（支持 GPT、Claude 等）
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        base_url = os.getenv("OPENAI_API_BASE_URL", "https://api.openai.com/v1")
+
+        # 尝试从配置数据库读取
+        cfg_key, cfg_base_url = _get_openai_credentials_from_config()
+        if cfg_key:
+            api_key = cfg_key
+        if cfg_base_url:
+            base_url = cfg_base_url
+
+        url = f"{base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": messages,
+        }
+        timeout = aiohttp.ClientTimeout(total=120)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload, headers=headers) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"OpenAI API error: {response.status} - {error_text}")
+                result = await response.json()
+                return result.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+
 async def call_llm_simple(
     prompt: str,
     system: Optional[str] = None,
@@ -116,9 +276,4 @@ async def call_llm_simple(
     Returns:
         LLM 生成的文本内容
     """
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-
-    return await _call_ollama_direct(messages, model)
+    return await call_llm_api(prompt, system=system, model=model)

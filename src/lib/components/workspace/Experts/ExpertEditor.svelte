@@ -7,7 +7,6 @@ import Spinner from '$lib/components/common/Spinner.svelte';
 import Textarea from '$lib/components/common/Textarea.svelte';
 import type { Expert, ExpertForm } from '$lib/apis/experts';
 import { getKnowledgeBases, getKnowledgeById } from '$lib/apis/knowledge';
-import ExpertWikiTab from './ExpertWikiTab.svelte';
 
 export let expert: Expert | null = null;
 export let clone = false;
@@ -194,10 +193,13 @@ current.add(pageId);
 setPinnedPages(Array.from(current));
 };
 
-const getSelectedSpaces = () => normalizedLines(spaces);
-const getSelectedPinnedPages = () => normalizedLines(pinnedPages);
+let selectedSpaceIds: string[] = [];
+let selectedPinnedPageIds: string[] = [];
 
-$: selectedKnowledge = availableKnowledge.filter((item) => getSelectedSpaces().includes(item.id));
+$: selectedSpaceIds = normalizedLines(spaces);
+$: selectedPinnedPageIds = normalizedLines(pinnedPages);
+
+$: selectedKnowledge = availableKnowledge.filter((item) => selectedSpaceIds.includes(item.id));
 
 $: selectablePinnedPages = selectedKnowledge.flatMap((item) =>
 (knowledgePagesBySpace[item.id] ?? []).map((page) => ({
@@ -208,7 +210,7 @@ knowledge_name: item.name
 );
 
 $: if (availableKnowledge.length > 0) {
-void hydrateSelectedKnowledgePages(getSelectedSpaces());
+void hydrateSelectedKnowledgePages(selectedSpaceIds);
 }
 
 $: if (expert) {
@@ -333,7 +335,7 @@ on:click={submit}
 </div>
 </div>
 <div class="text-xs text-gray-500 dark:text-gray-400">
-已选知识空间 {getSelectedSpaces().length} 个
+已选知识空间 {selectedSpaceIds.length} 个
 </div>
 </div>
 {#if loadingKnowledge}
@@ -350,7 +352,7 @@ on:click={submit}
 {#each availableKnowledge as item}
 <button
 type="button"
-class="w-full text-left rounded-xl border px-3 py-3 transition {getSelectedSpaces().includes(item.id)
+class="w-full text-left rounded-xl border px-3 py-3 transition {selectedSpaceIds.includes(item.id)
 ? 'border-gray-900 bg-white dark:border-gray-100 dark:bg-gray-950'
 : 'border-gray-200 bg-white/70 hover:bg-white dark:border-gray-800 dark:bg-gray-950/60 dark:hover:bg-gray-950'}"
 on:click={() => toggleKnowledgeSpace(item.id)}
@@ -373,7 +375,7 @@ on:click={() => toggleKnowledgeSpace(item.id)}
 </div>
 </div>
 
-{#if getSelectedSpaces().length > 0}
+{#if selectedSpaceIds.length > 0}
 <div class="rounded-2xl border border-gray-100 dark:border-gray-900 bg-gray-50/70 dark:bg-gray-900/40 p-3">
 <div class="flex items-center justify-between gap-3">
 <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -392,7 +394,7 @@ on:click={() => toggleKnowledgeSpace(item.id)}
 {#each selectablePinnedPages as page}
 <button
 type="button"
-class="w-full text-left rounded-xl border px-3 py-3 transition {getSelectedPinnedPages().includes(page.id)
+class="w-full text-left rounded-xl border px-3 py-3 transition {selectedPinnedPageIds.includes(page.id)
 ? 'border-gray-900 bg-white dark:border-gray-100 dark:bg-gray-950'
 : 'border-gray-200 bg-white/70 hover:bg-white dark:border-gray-800 dark:bg-gray-950/60 dark:hover:bg-gray-950'}"
 on:click={() => togglePinnedPage(page.id)}
@@ -499,10 +501,5 @@ on:click={() => togglePinnedPage(page.id)}
 </div>
 </details>
 
-{#if expert && expert.id}
-<div class="rounded-2xl border border-gray-100 dark:border-gray-900 bg-white dark:bg-gray-950 p-4">
-<ExpertWikiTab expertId={expert.id} />
-</div>
-{/if}
 </div>
 </div>

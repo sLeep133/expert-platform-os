@@ -68,10 +68,10 @@ class WikiCompiler:
     2. Step 2: LLM 根据分析结果生成 Wiki 页面
     """
 
-    def __init__(self, expert_id: str, llm_config: Optional[dict] = None):
-        self.expert_id = expert_id
+    def __init__(self, wiki_root: str | Path, target_id: str = "", llm_config: Optional[dict] = None):
+        self.expert_id = target_id
         self.llm_config = llm_config or {}
-        self.wiki_root = DATA_DIR / "experts" / expert_id
+        self.wiki_root = Path(wiki_root)
         self.raw_dir = self.wiki_root / "raw"
         self.wiki_dir = self.wiki_root / "wiki"
         self.graph_dir = self.wiki_root / "graph"
@@ -432,7 +432,7 @@ class WikiCompiler:
             result = await call_llm_chat(
                 prompt=prompt,
                 system="你是一个文档分析助手，擅长提取关键信息。请严格按照 JSON 格式返回结果。",
-                model=self.llm_config.get("model", "deepseek-r1:14b"),
+                model=self.llm_config.get("model"),
             )
 
             # 尝试解析 JSON
@@ -512,7 +512,7 @@ class WikiCompiler:
             page_content = await call_llm_chat(
                 prompt=prompt,
                 system="你是一个专业的 Wiki 编辑，擅长生成结构化、可读性强的文档内容。使用中文回复。",
-                model=self.llm_config.get("model", "deepseek-r1:14b"),
+                model=self.llm_config.get("model"),
             )
 
             # 如果返回为空或失败，使用 fallback
@@ -699,7 +699,74 @@ async def compile_expert_wiki(expert_id: str, file_path: str = None) -> CompileR
     Returns:
         CompileResult
     """
-    compiler = WikiCompiler(expert_id)
+    from open_webui.knowledge.wiki import get_expert_wiki_root
+    wiki_root = get_expert_wiki_root(expert_id)
+    compiler = WikiCompiler(wiki_root, target_id=expert_id)
     if file_path:
         return await compiler.compile_file(file_path)
+    return await compiler.compile_all()
+
+
+async def compile_knowledge_wiki(
+    knowledge_id: str,
+    files: list,
+    llm_config: Optional[dict] = None,
+) -> CompileResult:
+    """
+    便捷函数：编译指定 Knowledge Base 的 Wiki
+
+    将知识库文件写入 raw/ 目录，然后调用 WikiCompiler 进行两步式编译。
+
+    Args:
+        knowledge_id: Knowledge Base ID
+        files: 文件模型列表（需要包含 data.content 或 filename）
+        llm_config: LLM 配置（可选）
+
+    Returns:
+        CompileResult
+    """
+    from open_webui.knowledge.wiki import get_knowledge_wiki_root, ensure_knowledge_wiki_structure
+
+    wiki_root = ensure_knowledge_wiki_structure(knowledge_id)
+    raw_dir = wiki_root / "raw"
+
+    # 清理旧 raw 文件
+    if raw_dir.exists():
+        for old in raw_dir.iterdir():
+            if old.is_file():
+                old.unlink()
+
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    # 将文件内容写入 raw 目录
+    for file in files:
+        text = ""
+        data = getattr(file, "data", None) or {}
+        if isinstance(data, dict):
+            for key in ("content", "text", "body", "document"):
+                candidate = data.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    text = candidate.strip()
+                    break
+                if isinstance(candidate, list):
+                    joined = "\n\n".join(str(item).strip() for item in candidate if str(item).strip())
+                    if joined:
+                        text = joined
+                        break
+
+        if not text:
+            continue
+
+        source_name = (
+            (getattr(file, "meta", None) or {}).get("name")
+            or getattr(file, "filename", None)
+            or getattr(file, "id", "unknown")
+        )
+        safe_name = re.sub(r'[^\w.-]', '_', source_name)
+        if not safe_name:
+            safe_name = f"file_{getattr(file, 'id', 'unknown')}"
+
+        (raw_dir / safe_name).write_text(text, encoding="utf-8")
+
+    compiler = WikiCompiler(wiki_root, target_id=knowledge_id, llm_config=llm_config)
     return await compiler.compile_all()

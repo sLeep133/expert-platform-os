@@ -433,10 +433,13 @@ def get_expert_wiki_root(expert_id: str) -> Path:
     return DATA_DIR / "experts" / expert_id
 
 
-def ensure_wiki_structure(expert_id: str) -> Path:
-    """确保 Expert 的 Wiki 目录结构存在"""
-    wiki_root = get_expert_wiki_root(expert_id)
+def get_knowledge_wiki_root(knowledge_id: str) -> Path:
+    """获取 Knowledge Base 的 Wiki 根目录"""
+    return DATA_DIR / "knowledge" / knowledge_id
 
+
+def _ensure_wiki_structure(wiki_root: Path) -> Path:
+    """确保 Wiki 目录结构存在（通用实现）"""
     dirs = [
         "raw/articles",
         "raw/pdfs",
@@ -460,3 +463,13 @@ def ensure_wiki_structure(expert_id: str) -> Path:
             fpath.write_text("", encoding="utf-8")
 
     return wiki_root
+
+
+def ensure_wiki_structure(expert_id: str) -> Path:
+    """确保 Expert 的 Wiki 目录结构存在"""
+    return _ensure_wiki_structure(get_expert_wiki_root(expert_id))
+
+
+def ensure_knowledge_wiki_structure(knowledge_id: str) -> Path:
+    """确保 Knowledge Base 的 Wiki 目录结构存在"""
+    return _ensure_wiki_structure(get_knowledge_wiki_root(knowledge_id))

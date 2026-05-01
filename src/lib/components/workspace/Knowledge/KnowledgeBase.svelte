@@ -34,7 +34,9 @@
 		updateFileFromKnowledgeById,
 		updateKnowledgeById,
 		updateKnowledgeAccessGrants,
-		searchKnowledgeFilesById
+		searchKnowledgeFilesById,
+		getKnowledgeWikiHealth,
+		triggerKnowledgeWikiHealthCheck
 	} from '$lib/apis/knowledge';
 	import { getExperts } from '$lib/apis/experts';
 	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
@@ -143,6 +145,8 @@
 	let linkedExperts = [];
 	let loadingLinkedExperts = false;
 	let collapsedGroups: Record<string, boolean> = {};
+	let healthReport: any = null;
+	let checkingHealth = false;
 
 	const computeGroupedPages = (pages: any[]) => {
 		const groups: Record<string, { label: string; pages: any[] }> = {
@@ -289,6 +293,19 @@
 			toast.error(`${e}`);
 		} finally {
 			loadingLinkedExperts = false;
+		}
+	};
+
+	const checkHealth = async () => {
+		if (!knowledgeId) return;
+		checkingHealth = true;
+		try {
+			const report = await triggerKnowledgeWikiHealthCheck(localStorage.token, knowledgeId);
+			healthReport = report;
+		} catch (e) {
+			toast.error(`${e}`);
+		} finally {
+			checkingHealth = false;
 		}
 	};
 
@@ -1197,6 +1214,98 @@
 					</div>
 				{/if}
 			</div>
+				<div class="mt-3 rounded-2xl border border-gray-100 dark:border-gray-900 bg-white dark:bg-gray-950 px-3 py-3">
+					<div class="flex items-center justify-between gap-3">
+						<div>
+							<div class="text-sm font-medium text-gray-900 dark:text-gray-100">Wiki 健康检查</div>
+							<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+								检测断链、孤儿页和重复页，维护知识图谱质量。
+							</div>
+						</div>
+						<button
+							class="px-3 py-2 rounded-xl text-sm border border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+							disabled={checkingHealth}
+							on:click={checkHealth}
+						>
+							{#if checkingHealth}
+								<Spinner className="size-4" />
+							{/if}
+							运行检查
+						</button>
+					</div>
+
+					<div class="mt-2 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/50 rounded-lg p-2.5 space-y-1.5">
+						<div class="font-medium text-gray-700 dark:text-gray-200">什么时候应该点「运行检查」？</div>
+						<div>• 每次编译完 Wiki 后，点一下看看生成的页面有没有问题。</div>
+						<div>• 往知识库里新增或删除文件后，也建议检查一下。</div>
+						<div class="font-medium text-gray-700 dark:text-gray-200 mt-1">三个问题分别是什么意思？</div>
+						<div>
+							<span class="font-medium">断链（红色）：</span>某个页面里写了 <code class="text-[11px] bg-gray-200 dark:bg-gray-700 px-1 rounded">[[另一个页面]]</code>，但「另一个页面」并不存在。解决办法：把链接改成存在的页面名，或者创建这个缺失的页面。
+						</div>
+						<div>
+							<span class="font-medium">孤岛页面（黄色）：</span>这个页面存在，但没有任何其他页面链接到它，就像一座孤岛，很难被找到。解决办法：在相关的其他页面里加上 <code class="text-[11px] bg-gray-200 dark:bg-gray-700 px-1 rounded">[[这个页面名]]</code> 链接过来。
+						</div>
+						<div>
+							<span class="font-medium">重复页面（蓝色）：</span>有两个页面的文件名几乎一样。解决办法：删掉其中一个，或把两个合并成一个页面。
+						</div>
+					</div>
+
+					{#if healthReport}
+						<div class="mt-3 flex flex-wrap gap-2 text-xs">
+							<div class="px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-200">
+								总页面 {healthReport.total_pages ?? 0}
+							</div>
+							<div class="px-2 py-1 rounded-full {healthReport.issues?.length ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-200' : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-200'}">
+								问题 {healthReport.issues?.length ?? 0} 个
+							</div>
+						</div>
+
+						{#if healthReport.issues?.length > 0}
+							<div class="mt-3 space-y-2">
+								{#each healthReport.issues as issue}
+									<div class="rounded-xl border border-gray-100 dark:border-gray-900 p-3">
+										<div class="flex items-center gap-2">
+											<span class="text-xs px-2 py-0.5 rounded-full {issue.severity === 'high' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-200' : issue.severity === 'medium' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-200' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200'}">
+												{issue.severity}
+											</span>
+											<span class="text-sm font-medium text-gray-900 dark:text-gray-100">
+												{issue.rule_id === 'orphan-page' ? '孤岛页面' : issue.rule_id === 'duplicate-page' ? '重复页面' : issue.rule_id === 'broken-link' ? '断链' : issue.rule_id}
+											</span>
+										</div>
+										{#if issue.pages}
+											<div class="mt-2 text-xs text-gray-500 dark:text-gray-400 space-y-1">
+												{#each issue.pages as page}
+													<div class="truncate">{page}</div>
+												{/each}
+											</div>
+										{/if}
+										{#if issue.links}
+											<div class="mt-2 text-xs text-gray-500 dark:text-gray-400 space-y-1">
+												{#each issue.links as link}
+													<div class="truncate">{link.from} → {link.link}</div>
+												{/each}
+											</div>
+										<div class="mt-2 text-[11px] text-gray-400 dark:text-gray-500">
+											{#if issue.rule_id === 'broken-link'}
+												建议：把断链改成已存在的页面名，或创建这个缺失的页面。
+											{:else if issue.rule_id === 'orphan-page'}
+												建议：在其他相关页面里加上 [[页面名]] 链接到这个页面。
+											{:else if issue.rule_id === 'duplicate-page'}
+												建议：保留一个页面，删除或合并另一个重复的页面。
+											{/if}
+										</div>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<div class="mt-3 text-xs text-green-600 dark:text-green-400">
+								Wiki 健康状态良好，未发现问题。
+							</div>
+						{/if}
+					{/if}
+				</div>
+
 
 			<div class="mt-3 rounded-2xl border border-gray-100 dark:border-gray-900 bg-white dark:bg-gray-950 px-3 py-3">
 				<div class="flex items-center justify-between gap-3">

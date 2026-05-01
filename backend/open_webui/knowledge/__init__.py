@@ -12,13 +12,16 @@ from open_webui.knowledge.wiki import (
     WikiPage,
     WikiIndex,
     get_expert_wiki_root,
+    get_knowledge_wiki_root,
     ensure_wiki_structure,
+    ensure_knowledge_wiki_structure,
 )
 
 from open_webui.knowledge.compiler import (
     WikiCompiler,
     CompileResult,
     compile_expert_wiki,
+    compile_knowledge_wiki,
 )
 
 __all__ = [
@@ -27,8 +30,11 @@ __all__ = [
     "WikiPage",
     "WikiIndex",
     "get_expert_wiki_root",
+    "get_knowledge_wiki_root",
     "ensure_wiki_structure",
+    "ensure_knowledge_wiki_structure",
     "WikiCompiler",
     "CompileResult",
     "compile_expert_wiki",
+    "compile_knowledge_wiki",
 ]

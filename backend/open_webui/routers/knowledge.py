@@ -41,6 +41,9 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.models.models import Models, ModelForm
 
+from open_webui.knowledge.compiler import compile_knowledge_wiki
+from open_webui.knowledge.wiki import WikiRetriever, WikiHealthChecker, get_knowledge_wiki_root
+
 log = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -275,27 +278,35 @@ async def _compile_knowledge_pages(knowledge_id: str, job_id: str) -> None:
             asset_count=len(files),
         )
 
-        pages = []
-        for file in files:
-            source_name = (file.meta or {}).get('name') or file.filename or file.id
-            text = _extract_file_text(file)
-            excerpt = _truncate_text(text, 800)
-            summary = _truncate_text(text, 240) if text else 'No extracted text content available.'
+        # 调用真正的 llm-wiki 编译器（两步式：分析 → 生成）
+        result = await compile_knowledge_wiki(knowledge_id, files)
 
+        if result.errors:
+            log.warning(f'Knowledge wiki compile warnings for {knowledge_id}: {result.errors}')
+
+        # 从编译产出的 wiki 文件系统构建前端页面列表
+        wiki_root = get_knowledge_wiki_root(knowledge_id)
+        retriever = WikiRetriever(str(wiki_root))
+        all_wiki_pages = retriever.list_wiki_pages()
+
+        pages = []
+        for page in all_wiki_pages:
+            content = page.content or ''
             pages.append(
                 {
-                    'id': f'page-{file.id}',
-                    'title': _build_page_title(file),
-                    'source_file_id': file.id,
-                    'source_name': source_name,
-                    'summary': summary,
-                    'excerpt': excerpt,
-                    'word_count': len(text.split()) if text else 0,
-                    'updated_at': file.updated_at or file.created_at or started_at,
+                    'id': page.path.replace('/', '-').replace('.md', ''),
+                    'title': page.title,
+                    'source_file_id': page.sources[0] if page.sources else '',
+                    'source_name': page.sources[0] if page.sources else page.path,
+                    'summary': (content[:240] + '...') if len(content) > 240 else content,
+                    'excerpt': (content[:800] + '...') if len(content) > 800 else content,
+                    'word_count': len(content.split()),
+                    'updated_at': started_at,
+                    'page_type': page.page_type,
                 }
             )
 
-        pages.sort(key=lambda page: (page['title'].lower(), page['source_file_id']))
+        pages.sort(key=lambda page: (page['title'].lower(), page['id']))
         index = [
             {
                 'id': page['id'],
@@ -736,6 +747,81 @@ async def compile_knowledge_by_id(
 
     refreshed = await Knowledges.get_knowledge_by_id(id=id, db=db)
     return _build_compile_response(refreshed or knowledge)
+
+
+############################
+# WikiHealth
+############################
+
+
+@router.get('/{id}/wiki/health')
+async def get_knowledge_wiki_health(
+	id: str,
+	user=Depends(get_verified_user),
+	db: AsyncSession = Depends(get_async_session),
+):
+	knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
+	if not knowledge:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail=ERROR_MESSAGES.NOT_FOUND,
+		)
+
+	if not (
+		user.role == 'admin'
+		or knowledge.user_id == user.id
+		or await AccessGrants.has_access(
+			user_id=user.id,
+			resource_type='knowledge',
+			resource_id=knowledge.id,
+			permission='read',
+			db=db,
+		)
+	):
+		raise HTTPException(
+			status_code=status.HTTP_400_BAD_REQUEST,
+			detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+		)
+
+	wiki_root = get_knowledge_wiki_root(id)
+	checker = WikiHealthChecker(str(wiki_root))
+	report = await checker.check_all()
+	return report
+
+
+@router.post('/{id}/wiki/health-check')
+async def trigger_knowledge_wiki_health_check(
+	id: str,
+	user=Depends(get_verified_user),
+	db: AsyncSession = Depends(get_async_session),
+):
+	knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
+	if not knowledge:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail=ERROR_MESSAGES.NOT_FOUND,
+		)
+
+	if not (
+		user.role == 'admin'
+		or knowledge.user_id == user.id
+		or await AccessGrants.has_access(
+			user_id=user.id,
+			resource_type='knowledge',
+			resource_id=knowledge.id,
+			permission='read',
+			db=db,
+		)
+	):
+		raise HTTPException(
+			status_code=status.HTTP_400_BAD_REQUEST,
+			detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+		)
+
+	wiki_root = get_knowledge_wiki_root(id)
+	checker = WikiHealthChecker(str(wiki_root))
+	report = await checker.check_all()
+	return report
 
 
 ############################
