@@ -4,13 +4,31 @@
 ![GitHub stars](https://img.shields.io/github/stars/sLeep133/expert-platform-os?style=social)
 ![GitHub forks](https://img.shields.io/github/forks/sLeep133/expert-platform-os?style=social)
 
-Expert Platform OS 是一个基于 OpenWebUI 二次开发的**企业级 AI 专家平台**，支持知识库管理、专家智能体、工作空间协作等功能。基于 **Karpathy llm-wiki 方法论**构建知识图谱，实现"一次编译，处处使用"。
+> **我不懂 Python，核心功能（专家系统 + Wiki）完全通过 Claude Code vibe coding 实现。**
+
+基于 [OpenWebUI](https://github.com/open-webui/open-webui) 扩展的**企业级 AI 专家平台**。
+支持角色化专家答疑与 Obsidian 兼容的 Wiki 知识库，基于 **Karpathy llm-wiki 方法论**构建知识图谱。
+
+[📺 演示视频]() · [🚀 在线体验]() · [📖 部署文档](#快速部署)
+
+---
+
+## 与 OpenWebUI 原版的区别
+
+| 功能 | OpenWebUI 原版 | Expert Platform OS |
+|------|---------------|-------------------|
+| 交互方式 | 通用聊天 | **角色化专家答疑** |
+| 知识管理 | 文件上传 | **Obsidian 双向链接 Wiki** |
+| 企业权限 | 基础 | **工作空间级隔离** |
+| 知识编译 | 无 | **llm-wiki 预编译优化** |
+
+---
 
 ## 核心功能
 
 ### 🧠 专家智能体
-- 创建 AI 专家角色，配置角色设定和大模型
-- 关联知识库，让专家具备专业领域知识
+- 创建 AI 专家角色（如"仓库管理专家"、"财务审核专家"）
+- 关联知识库，实现领域专用回答
 - 支持私有/共享模式，团队共享专家资源
 - 基于知识图谱的语义检索，理解实体关系
 
@@ -93,6 +111,24 @@ expert-platform-os/
 - **后端**: Python FastAPI + SQLAlchemy
 - **数据库**: SQLite（默认）/ PostgreSQL
 - **知识图谱**: 原生 Markdown + Wikilinks（Obsidian 兼容）
+
+## 声明
+
+本项目基于 [OpenWebUI](https://github.com/open-webui/open-webui)（MIT 协议）进行扩展开发。
+
+**自研模块**：
+- 专家智能体系统（角色定义、知识库绑定、权限控制）
+- Wiki 知识库与编译器（Obsidian 兼容、llm-wiki 优化）
+
+上游代码版权归属原项目作者。
+
+---
+
+## Star History
+
+如果这个项目对你有帮助，请点个 ⭐️，让更多人发现它。
+
+[![Star History Chart](https://api.star-history.com/svg?repos=sLeep133/expert-platform-os&type=Date)](https://star-history.com/#sLeep133/expert-platform-os&Date)
 
 ## License
 
