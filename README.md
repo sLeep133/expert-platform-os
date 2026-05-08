@@ -4,8 +4,6 @@
 ![GitHub stars](https://img.shields.io/github/stars/sLeep133/expert-platform-os?style=social)
 ![GitHub forks](https://img.shields.io/github/forks/sLeep133/expert-platform-os?style=social)
 
-> **我不懂 Python，核心功能（专家系统 + Wiki）完全通过 Claude Code vibe coding 实现。**
-
 基于 [OpenWebUI](https://github.com/open-webui/open-webui) 扩展的**企业级 AI 专家平台**。
 支持角色化专家答疑与 Obsidian 兼容的 Wiki 知识库，基于 **Karpathy llm-wiki 方法论**构建知识图谱。
 
