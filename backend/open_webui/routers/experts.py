@@ -359,7 +359,12 @@ async def compile_expert_wiki_api(
             detail='Access prohibited.',
         )
 
-    result = await compile_expert_wiki(id, file_path)
+    # 使用 Expert 自己配置的模型（如果有）
+    llm_config = None
+    if expert.runtime_model:
+        llm_config = {'model': expert.runtime_model}
+
+    result = await compile_expert_wiki(id, file_path, llm_config=llm_config)
 
     return {
         'expert_id': id,

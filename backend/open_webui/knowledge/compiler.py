@@ -257,17 +257,47 @@ class WikiCompiler:
                 duration=time.time() - start_time,
             )
 
+    @staticmethod
+    def _is_real_pdf(file_path: Path) -> bool:
+        """检查文件头是否为真正的 PDF 二进制格式"""
+        try:
+            with open(file_path, "rb") as f:
+                header = f.read(5)
+                return header.startswith(b"%PDF-")
+        except Exception:
+            return False
+
+    @staticmethod
+    def _is_real_docx(file_path: Path) -> bool:
+        """检查文件头是否为真正的 ZIP/DOCX 格式"""
+        try:
+            with open(file_path, "rb") as f:
+                header = f.read(2)
+                return header == b"PK"
+        except Exception:
+            return False
+
     def _read_file_content(self, file_path: Path) -> str:
-        """根据文件类型读取内容"""
+        """根据文件类型读取内容（支持魔数检查，防止扩展名与实际内容不符）"""
         suffix = file_path.suffix.lower()
 
-        # PDF 文件
+        # PDF 文件：先检查魔数，不匹配则 fallback 到文本
         if suffix == '.pdf':
-            return self._read_pdf(file_path)
+            if self._is_real_pdf(file_path):
+                return self._read_pdf(file_path)
+            log.warning(f"File {file_path.name} has .pdf extension but is not a real PDF, reading as text")
+            return file_path.read_text(encoding="utf-8", errors="ignore")
 
-        # Word 文档
+        # Word 文档：先检查魔数（DOCX 是 ZIP 格式），不匹配则 fallback 到文本
         if suffix in ['.docx', '.doc']:
-            return self._read_docx(file_path)
+            if suffix == '.docx' and self._is_real_docx(file_path):
+                return self._read_docx(file_path)
+            # .doc 老式二进制格式无法简单魔数检查，直接尝试；失败 fallback
+            result = self._read_docx(file_path)
+            if not result.startswith("[Word 文档读取失败"):
+                return result
+            log.warning(f"Failed to read {file_path.name} as docx, falling back to text")
+            return file_path.read_text(encoding="utf-8", errors="ignore")
 
         # Markdown / 纯文本文件 - 直接读取
         if suffix in ['.md', '.txt', '.text']:
@@ -281,9 +311,21 @@ class WikiCompiler:
         ]:
             return file_path.read_text(encoding="utf-8", errors="ignore")
 
-        # Excel 文件
+        # Excel 文件：xlsx 是 ZIP，xls 是 OLE2；不匹配则 fallback 到文本/CSV
         if suffix in ['.xlsx', '.xls', '.csv']:
-            return self._read_excel(file_path)
+            if suffix == '.csv':
+                result = self._read_excel(file_path)
+                if not result.startswith("[Excel 文件读取失败"):
+                    return result
+                return file_path.read_text(encoding="utf-8", errors="ignore")
+            if suffix == '.xlsx' and self._is_real_docx(file_path):
+                return self._read_excel(file_path)
+            # xls 尝试读取，失败 fallback
+            result = self._read_excel(file_path)
+            if not result.startswith("[Excel 文件读取失败"):
+                return result
+            log.warning(f"Failed to read {file_path.name} as excel, falling back to text")
+            return file_path.read_text(encoding="utf-8", errors="ignore")
 
         # 默认：尝试读取文本，失败则返回空
         try:
@@ -292,7 +334,7 @@ class WikiCompiler:
             return f"[无法读取 {suffix} 格式的文件内容]"
 
     def _read_pdf(self, file_path: Path) -> str:
-        """读取 PDF 文件内容"""
+        """读取 PDF 文件内容（调用前已通过 _is_real_pdf 校验）"""
         try:
             from pypdf import PdfReader
             reader = PdfReader(file_path)
@@ -357,6 +399,12 @@ class WikiCompiler:
                 content = self._read_file_content(file_path)
                 analysis = await self._step1_analyze(content, file_path.name)
 
+                # 检查 LLM 分析是否失败
+                if analysis.get("llm_error"):
+                    err = f"LLM analysis failed for {file_path.name}: {analysis['llm_error']}"
+                    log.error(err)
+                    errors.append(err)
+
                 # 收集实体和概念
                 for entity in analysis.get("key_entities", []):
                     self._global_entities.add(entity)
@@ -389,7 +437,7 @@ class WikiCompiler:
 
         return CompileResult(
             expert_id=self.expert_id,
-            status="completed" if not errors else "failed" if errors else "completed",
+            status="failed" if errors else "completed",
             pages=all_pages,
             errors=errors,
             duration=time.time() - start_time,
@@ -470,6 +518,7 @@ class WikiCompiler:
                 "key_concepts": [],
                 "topics": [],
                 "suggested_page_type": "topic",
+                "llm_error": str(e),
             }
 
     async def _step2_generate(self, analysis: dict, source_file: Path) -> list[dict]:
@@ -688,20 +737,21 @@ type: synthesis
         return await self.compile_all()
 
 
-async def compile_expert_wiki(expert_id: str, file_path: str = None) -> CompileResult:
+async def compile_expert_wiki(expert_id: str, file_path: str = None, llm_config: Optional[dict] = None) -> CompileResult:
     """
     便捷函数：编译指定 Expert 的 Wiki
 
     Args:
         expert_id: Expert ID
         file_path: 可选，指定单个文件路径
+        llm_config: 可选，LLM 配置（如 {"model": "xxx"}）
 
     Returns:
         CompileResult
     """
     from open_webui.knowledge.wiki import get_expert_wiki_root
     wiki_root = get_expert_wiki_root(expert_id)
-    compiler = WikiCompiler(wiki_root, target_id=expert_id)
+    compiler = WikiCompiler(wiki_root, target_id=expert_id, llm_config=llm_config)
     if file_path:
         return await compiler.compile_file(file_path)
     return await compiler.compile_all()

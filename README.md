@@ -51,6 +51,35 @@
 - 支持本地 Ollama 模型
 - 无需显卡，纯 CPU 即可运行
 
+## 功能演示
+
+### 1. 角色化专家系统
+创建 AI 专家角色，绑定知识空间，实现领域专用回答。
+
+![专家列表](docs/screenshots/experts-list.png)
+
+### 2. 专家关联 Wiki 知识库
+新建专家时一键关联知识空间，按需勾选重点 Wiki 页面。
+
+![新建专家](docs/screenshots/create-expert.png)
+
+### 3. PDF 自动编译为 Wiki
+上传 PDF/Word/Excel，自动编译为结构化 Wiki 页面（Obsidian 兼容），自动生成 `[[wikilinks]]` 双向链接。
+
+![知识库 Wiki 编译](docs/screenshots/knowledge-wiki.png)
+
+### 4. 知识库增强 vs 通用回答
+同一问题，有无 Expert 的回答质量差异显著。Expert 自动注入 Wiki 上下文。
+
+![问答对比](docs/screenshots/qa-comparison.png)
+
+### 5. 结构化领域回答
+Expert 基于 Wiki 知识图谱生成结构化回答，支持追问与知识溯源。
+
+![专家交流](docs/screenshots/expert-chat.png)
+
+---
+
 ## 设计理念
 
 **一次编译，处处使用**：
