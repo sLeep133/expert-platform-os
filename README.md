@@ -9,7 +9,7 @@
 基于 [OpenWebUI](https://github.com/open-webui/open-webui) 扩展的**企业级 AI 专家平台**。
 支持角色化专家答疑与 Obsidian 兼容的 Wiki 知识库，基于 **Karpathy llm-wiki 方法论**构建知识图谱。
 
-[📺 演示视频]() · [🚀 在线体验]() · [📖 部署文档](#快速部署)
+[📖 部署文档](#快速部署) · [📺 演示视频（录制中）](#功能演示)
 
 ---
 
