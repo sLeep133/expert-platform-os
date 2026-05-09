@@ -9,6 +9,8 @@
 				goto('/workspace/knowledge');
 			} else if ($user?.permissions?.workspace?.experts) {
 				goto('/workspace/experts');
+			} else if ($user?.permissions?.workspace?.tools) {
+				goto('/workspace/tools');
 			} else if ($user?.permissions?.workspace?.skills) {
 				goto('/workspace/skills');
 			} else {
